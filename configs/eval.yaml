@@ -1,0 +1,21 @@
+# C8 evaluation. Test labels are only read by eval/metrics.py, never by training.
+run_id: eval_untrained_seed0
+seed: 0                         # run 3 seeds (0, 1, 2) for every headline number
+council_config: configs/council.yaml
+gpu_memory_utilization: 0.28    # all 3 members loaded together (debate / Karpathy need them)
+temperature: 0.0
+loras: {}                       # e.g. {qwen: runs/cross_model_v1/round2_qwen/stepfinal}
+loras_from_state: null          # or runs/cross_model_v1/state.json to use the trained council
+
+datasets:
+  - data/processed/truthfulqa_mc1.jsonl
+  - data/processed/arc_challenge.jsonl
+  - data/processed/mmlu_pro.jsonl
+  - data/processed/gsm8k.jsonl
+split: test
+n: 0                            # 0 = whole test split (300 per dataset)
+conditions: [neutral, user_wrong, user_right, are_you_sure, peer_wrong]
+protocols:
+  - {name: independent}
+  - {name: karpathy_style}
+  - {name: debate, rounds: 1}

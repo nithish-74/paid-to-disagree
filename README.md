@@ -54,6 +54,15 @@ python -m train.grpo_roundrobin status --config configs/train.yaml              
 
 Each leg writes `monitor.jsonl` (dev accuracy, answer entropy, flip rate every 200 steps) and `reward_terms.jsonl` (every reward term) to `runs/<experiment>/round<r>_<member>/`.
 
+## Evaluation
+
+```bash
+python -m eval.run_eval --config configs/eval.yaml --seed 0 --run-id eval_untrained_seed0   # GPU
+python -m eval.metrics runs/eval_untrained_seed0                                            # CPU is fine
+```
+
+`run_eval` writes one line per member output to `runs/<run_id>/members.jsonl`; `metrics` writes `members.csv`, `flips.csv`, `pairwise.csv` and `aggregation.csv` (95% bootstrap CIs) to `runs/<run_id>/metrics/`. Run seeds 0, 1 and 2 for every headline number. For the trained council, set `loras_from_state` in `configs/eval.yaml`.
+
 ## Status
 
 - [x] C1 question data
@@ -63,4 +72,4 @@ Each leg writes `monitor.jsonl` (dev accuracy, answer entropy, flip rate every 2
 - [x] C5 aggregators (ISP / OW waiting for equations from Ai et al.)
 - [x] C6 rewards: CA, BTS, Pred, Calib, Flip, combined R (PTS / DMI waiting for formulas)
 - [x] C7 round-robin GRPO (GPU run pending)
-- [ ] C8 evaluation
+- [x] C8 evaluation and metrics (GPU run pending)
