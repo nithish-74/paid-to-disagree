@@ -46,7 +46,7 @@ Each member must show `invalid` under 5% on the dev set before moving on. Output
 - [x] C2 pressure conditions
 - [x] C3 council members (GPU check pending)
 - [x] C4 protocols (GPU check pending)
-- [ ] C5 aggregators
-- [ ] C6 rewards
+- [x] C5 aggregators (ISP / OW waiting for equations from Ai et al.)
+- [x] C6 rewards: CA, BTS, Pred, Calib, Flip, combined R (PTS / DMI waiting for formulas)
 - [ ] C7 training
 - [ ] C8 evaluation

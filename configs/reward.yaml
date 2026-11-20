@@ -1,0 +1,13 @@
+# C6 reward weights (architecture doc start values). Tune on dev; report final values.
+l1_pp_cross: 1.0
+l2_bts_info: 0.5
+l3_pred: 0.25
+l4_calib: 0.25
+l5_flip: 1.0
+l0_oracle: 1.0
+oracle: false            # true ONLY for the oracle upper-bound ablation
+bts_mean: geometric      # TODO(team): confirm against Mytsyk et al. 2026 (geometric | arithmetic)
+eps: 0.001
+invalid_penalty: -2.0    # not fixed by the doc
+missing_pred: -1.0       # not fixed by the doc
+missing_confidence: -1.0 # not fixed by the doc
