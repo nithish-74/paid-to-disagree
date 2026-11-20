@@ -147,7 +147,7 @@ class UnslothBackend:
 
 
 def cmd_cache(cfg: dict[str, Any], members: list[str] | None) -> None:
-    from council.members import CouncilMember, VLLMBackend
+    from council.members import CouncilMember, make_backend
     from train.peer_cache import PeerCache, generate_samples
 
     council = load_yaml(cfg["council_config"])
@@ -165,7 +165,7 @@ def cmd_cache(cfg: dict[str, Any], members: list[str] | None) -> None:
         backend_kwargs = {**mc["backend"], "gpu_memory_utilization": cfg["cache"]["gpu_memory_utilization"]}
         if lora:
             backend_kwargs.update(lora_path=lora, max_lora_rank=cfg["lora"]["r"])
-        backend = VLLMBackend(**backend_kwargs)
+        backend = make_backend(**backend_kwargs)
         member = CouncilMember(name, backend, temperature=cfg["cache"]["temperature"],
                                max_tokens=gen.get("max_tokens", 256), token_prob_fallback=True)
         start = time.time()

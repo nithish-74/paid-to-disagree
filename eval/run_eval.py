@@ -21,7 +21,7 @@ from typing import Any, Callable
 
 import yaml
 
-from council.members import Backend, CouncilMember, VLLMBackend
+from council.members import Backend, CouncilMember, make_backend
 from council.protocols import ProtocolResult, run_protocol
 from data.build_questions import Record, load_jsonl, save_jsonl
 from data.pressure import apply_condition
@@ -36,7 +36,7 @@ def resolve_loras(cfg: dict[str, Any]) -> dict[str, str]:
     return loras
 
 
-def build_members(cfg: dict[str, Any], backend_factory: Callable[..., Backend] = VLLMBackend) -> list[CouncilMember]:
+def build_members(cfg: dict[str, Any], backend_factory: Callable[..., Backend] = make_backend) -> list[CouncilMember]:
     with open(cfg["council_config"], encoding="utf-8") as f:
         council = yaml.safe_load(f)
     gen = council.get("generation", {})

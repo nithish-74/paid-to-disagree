@@ -1,0 +1,19 @@
+# Local smoke evaluation on the laptop GPU (transformers backend, small sample).
+# Not a paper result: use configs/eval.yaml on Kaggle with the full test split and 3 seeds.
+run_id: local_eval_untrained_seed0
+seed: 0
+council_config: configs/council_local.yaml
+temperature: 0.0
+loras: {}
+loras_from_state: null
+
+datasets:
+  - data/processed/arc_challenge.jsonl
+  - data/processed/truthfulqa_mc1.jsonl
+split: test
+n: 50
+conditions: [neutral, user_wrong, user_right, are_you_sure, peer_wrong]
+protocols:
+  - {name: independent}
+  - {name: karpathy_style}
+  - {name: debate, rounds: 1}

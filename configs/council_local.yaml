@@ -1,0 +1,19 @@
+# Local smoke-run council (Windows laptop, 6 GB GPU, no vLLM). Same models as
+# configs/council.yaml, loaded with plain transformers. offload: true keeps each model
+# in CPU RAM and moves it to the GPU only while it is answering, so all three fit.
+# Llama/Gemma point at Unsloth's ungated copies of the same weights (no HF login needed);
+# accept the original licences on Hugging Face before using them for real experiments.
+generation:
+  temperature: 0.0
+  max_tokens: 256
+  seed: 0
+  token_prob_fallback: true
+  always_option_probs: false
+
+members:
+  - name: qwen
+    backend: {kind: transformers, model: Qwen/Qwen2.5-1.5B-Instruct, dtype: bfloat16, offload: true, batch_size: 16}
+  - name: llama
+    backend: {kind: transformers, model: unsloth/Llama-3.2-1B-Instruct, dtype: bfloat16, offload: true, batch_size: 16}
+  - name: gemma
+    backend: {kind: transformers, model: unsloth/gemma-3-1b-it, dtype: bfloat16, offload: true, batch_size: 16}

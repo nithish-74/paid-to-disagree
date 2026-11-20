@@ -70,7 +70,7 @@ def test_parse_answer_mcq_and_number():
 
 def test_system_prompt_mentions_letters_and_is_shared():
     sp = system_prompt(MCQ)
-    assert '"A": <p>, "B": <p>, "C": <p>, "D": <p>' in sp and "OTHER council members" in sp
+    assert '"A": <number>, "B": <number>, "C": <number>, "D": <number>' in sp and "OTHER council members" in sp
     assert "<a single number>" in system_prompt(NUM)
 
 
@@ -157,3 +157,29 @@ def test_load_members_and_write_outputs(tmp_path):
     [[out]] = members[0].answer_prompts([apply_condition(MCQ, "neutral")], RECS)
     write_outputs([out], tmp_path / "o.jsonl")
     assert json.loads((tmp_path / "o.jsonl").read_text(encoding="utf-8"))["answer"] == "B"
+
+
+# ---------------------------------------------------------------- real near-miss replies (local run, 2026-11-20)
+
+LLAMA_MISSING_BRACE = (
+    '{"reason": "Safety.", "answer": "C", "confidence": 0.9, "peer_prediction": '
+    '{"A": "x", "B": "y", "C": "z", "D": "w"}'
+)
+GEMMA_MISSING_COLON = (
+    '```json\n{\n  "reason": "Photosynthesis.",\n  "answer": "C",\n  "confidence": 0.95,\n'
+    '  "peer_prediction"\n  {"A": "False", "B": "False", "C": "True", "D": "False"}\n}\n```'
+)
+
+
+def test_repairs_real_near_miss_replies():
+    for raw in (LLAMA_MISSING_BRACE, GEMMA_MISSING_COLON):
+        p = parse_answer(raw, MCQ)
+        assert p.error is None and p.answer == "C"
+        assert p.peer_prediction is None  # option text / booleans are not probabilities
+
+
+def test_prefers_object_with_answer_over_nested_dict():
+    # unrepairable outer object (missing comma): falls back to the inner dict, which has no answer
+    raw = '{"answer": "B" "confidence": 0.5, "peer_prediction": {"A": 1}}'
+    assert parse_answer(raw, MCQ).error == "bad_answer"
+    assert extract_json_object('{"x": 1} then {"answer": "D"}') == {"answer": "D"}

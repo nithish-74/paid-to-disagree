@@ -21,7 +21,7 @@ from typing import Callable
 
 import yaml
 
-from council.members import Backend, CouncilMember, VLLMBackend, load_members, write_outputs
+from council.members import Backend, CouncilMember, load_members, make_backend, write_outputs
 from data.build_questions import load_jsonl
 from data.pressure import CONDITIONS, apply_condition
 
@@ -31,7 +31,7 @@ def check(
     records: list[dict],
     conditions: list[str],
     run_dir: Path,
-    backend_factory: Callable[..., Backend] = VLLMBackend,
+    backend_factory: Callable[..., Backend] = make_backend,
 ) -> dict[str, dict]:
     recs = {r["qid"]: r for r in records}
     prompts = [apply_condition(r, c) for r in records for c in conditions]

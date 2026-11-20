@@ -151,7 +151,7 @@ def debate(
 
 def parse_ranking(text: str, k: int) -> tuple[list[int] | None, str | None]:
     """Ranking of response numbers 1..k (best first); accepts ints or 'Response 2' strings."""
-    obj = extract_json_object(text)
+    obj = extract_json_object(text, prefer_key="ranking")
     if obj is None:
         return None, "no_json"
     raw = obj.get("ranking")

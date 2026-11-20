@@ -40,7 +40,7 @@ Reply with ONLY one JSON object and no other text, using exactly these keys:
 MCQ_SPEC = {
     "answer_spec": '"<one option letter: {letters}>"',
     "peer_spec": "{{{example}}}",
-    "peer_desc": "a probability for every option letter, summing to 1.",
+    "peer_desc": "for every option letter, a probability (a NUMBER between 0 and 1, not option text), summing to 1.",
 }
 NUMBER_SPEC = {
     "answer_spec": "<a single number>",
@@ -53,7 +53,7 @@ RETRY_MESSAGE = "Your reply could not be read. Reply again with ONLY the JSON ob
 def system_prompt(rec: Record) -> str:
     if rec["answer_type"] == "mcq":
         letters = LETTERS[: len(rec["options"])]
-        example = ", ".join(f'"{L}": <p>' for L in letters)
+        example = ", ".join(f'"{L}": <number>' for L in letters)
         spec = {k: v.format(letters=", ".join(letters), example=example) for k, v in MCQ_SPEC.items()}
     else:
         spec = {k: v.format() for k, v in NUMBER_SPEC.items()}
@@ -63,12 +63,29 @@ def system_prompt(rec: Record) -> str:
 # ================================================================ parsing
 
 
-def extract_json_object(text: str) -> dict | None:
-    """First JSON object in text; tolerates code fences, surrounding prose, trailing commas."""
+def repair_json(text: str) -> str:
+    """Fix near-miss JSON seen from 1-2B models:
+    trailing commas, a missing ':' between a key and an object/array ("key" {...}),
+    and unclosed braces at the end of the reply.
+    """
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    text = re.sub(r'("[A-Za-z_]+")\s*(?=[{\[])', r"\1: ", text)
+    missing = text.count("{") - text.count("}")
+    return text.rstrip() + "}" * missing if missing > 0 else text
+
+
+def extract_json_object(text: str, prefer_key: str | None = "answer") -> dict | None:
+    """The JSON object in a reply; tolerates code fences, prose and near-miss JSON.
+
+    Scans every '{' and returns the first object containing `prefer_key` (so a broken outer
+    object does not fall back to a nested peer_prediction dict); otherwise the first object.
+    The raw text is tried before the repaired one.
+    """
     text = re.sub(r"```(?:json)?", "", text)
     text = text.replace("“", '"').replace("”", '"')
-    for candidate in (text, re.sub(r",\s*([}\]])", r"\1", text)):
-        decoder = json.JSONDecoder()
+    fallback = None
+    decoder = json.JSONDecoder()
+    for candidate in (text, repair_json(text)):
         for i, ch in enumerate(candidate):
             if ch != "{":
                 continue
@@ -76,9 +93,12 @@ def extract_json_object(text: str) -> dict | None:
                 obj, _ = decoder.raw_decode(candidate[i:])
             except json.JSONDecodeError:
                 continue
-            if isinstance(obj, dict):
+            if not isinstance(obj, dict):
+                continue
+            if prefer_key is None or prefer_key in obj:
                 return obj
-    return None
+            fallback = fallback or obj
+    return fallback
 
 
 def parse_letter(value: Any, n_options: int) -> str | None:
@@ -259,6 +279,121 @@ class VLLMBackend:
                     probs[tok] += math.exp(lp.logprob)
             result.append(probs)
         return result
+
+
+class TransformersBackend:
+    """Plain transformers backend for local GPUs/CPUs where vLLM is unavailable (e.g. Windows).
+
+    offload=True keeps the weights in CPU RAM and moves them to the GPU only for each call,
+    so a whole council can share a small (6 GB) GPU. Slower than vLLM; use for smoke runs.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        dtype: str = "bfloat16",
+        device: str | None = None,
+        offload: bool = False,
+        batch_size: int = 8,
+        lora_path: str | None = None,
+        **_ignored: Any,  # vLLM-only settings such as gpu_memory_utilization
+    ) -> None:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        self.torch = torch
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.offload = offload and self.device != "cpu"
+        self.batch_size = batch_size
+        self.tok = AutoTokenizer.from_pretrained(model)
+        self.tok.padding_side = "left"
+        if self.tok.pad_token is None:
+            self.tok.pad_token = self.tok.eos_token
+        self.model = AutoModelForCausalLM.from_pretrained(model, torch_dtype=getattr(torch, dtype))
+        if lora_path:
+            from peft import PeftModel
+
+            self.model = PeftModel.from_pretrained(self.model, lora_path)
+        self.model.eval()
+        self.model.to("cpu" if self.offload else self.device)
+
+    def _on_device(self):
+        if self.offload:
+            self.model.to(self.device)
+
+    def _off_device(self):
+        if self.offload:
+            self.model.to("cpu")
+            self.torch.cuda.empty_cache()
+
+    def _encode(self, texts: list[str]):
+        return self.tok(texts, return_tensors="pt", padding=True, add_special_tokens=False).to(self.device)
+
+    def chat(self, conversations, temperature, max_tokens, seed=None):
+        texts = [self.tok.apply_chat_template(c, tokenize=False, add_generation_prompt=True) for c in conversations]
+        out: list[str] = []
+        self._on_device()
+        try:
+            for i in range(0, len(texts), self.batch_size):
+                enc = self._encode(texts[i : i + self.batch_size])
+                kwargs: dict[str, Any] = {"max_new_tokens": max_tokens, "pad_token_id": self.tok.pad_token_id}
+                if temperature > 0:
+                    if seed is not None:
+                        self.torch.manual_seed(seed + i)
+                    kwargs.update(do_sample=True, temperature=temperature)
+                else:
+                    kwargs.update(do_sample=False, temperature=None, top_p=None, top_k=None)
+                with self.torch.no_grad():
+                    gen = self.model.generate(**enc, **kwargs)
+                out += self.tok.batch_decode(gen[:, enc["input_ids"].shape[1] :], skip_special_tokens=True)
+        finally:
+            self._off_device()
+        return out
+
+    def next_token_probs(self, conversations, assistant_prefix, candidates):
+        texts = [
+            self.tok.apply_chat_template(
+                c + [{"role": "assistant", "content": assistant_prefix}], tokenize=False, continue_final_message=True
+            )
+            for c in conversations
+        ]
+        # every token whose decoded text is exactly a candidate ("B" or " B")
+        cand_ids: dict[str, set[int]] = {c: set() for c in candidates}
+        for c in candidates:
+            for variant in (c, " " + c):
+                ids = self.tok.encode(variant, add_special_tokens=False)
+                if len(ids) == 1:
+                    cand_ids[c].add(ids[0])
+        result: list[dict[str, float]] = []
+        self._on_device()
+        try:
+            for i in range(0, len(texts), self.batch_size):
+                enc = self._encode(texts[i : i + self.batch_size])
+                with self.torch.no_grad():
+                    logits = self.model(**enc).logits[:, -1, :].float()
+                probs = self.torch.softmax(logits, dim=-1)
+                for row in probs:
+                    result.append({c: float(sum(row[t] for t in ids)) for c, ids in cand_ids.items()})
+        finally:
+            self._off_device()
+        return result
+
+    def close(self) -> None:
+        import gc
+
+        del self.model
+        gc.collect()
+        if self.torch.cuda.is_available():
+            self.torch.cuda.empty_cache()
+
+
+def make_backend(kind: str = "vllm", **kwargs: Any) -> Backend:
+    """Build a backend from a config block: {kind: vllm | transformers, model: ..., ...}."""
+    if kind == "vllm":
+        return VLLMBackend(**kwargs)
+    if kind == "transformers":
+        return TransformersBackend(**kwargs)
+    raise ValueError(f"unknown backend kind {kind!r}")
 
 
 # ================================================================ members
@@ -450,7 +585,7 @@ class CouncilMember:
 # ================================================================ loading and logging
 
 
-def load_members(cfg: dict, backend_factory: Callable[..., Backend] = VLLMBackend) -> list[CouncilMember]:
+def load_members(cfg: dict, backend_factory: Callable[..., Backend] = make_backend) -> list[CouncilMember]:
     """Build members from configs/council.yaml (see that file for keys)."""
     defaults = cfg.get("generation", {})
     members = []
