@@ -26,12 +26,26 @@ python -m pytest
 
 GPU parts (vLLM, TRL, Unsloth) run on Kaggle/Colab (T4, fp16).
 
+## Phase 1 member check (Kaggle, GPU)
+
+1. Accept the model licences on Hugging Face for `meta-llama/Llama-3.2-1B-Instruct` and `google/gemma-3-1b-it`, and add `HF_TOKEN` as a Kaggle secret.
+2. In a GPU notebook:
+
+```bash
+git clone https://github.com/nithish-74/paid-to-disagree.git && cd paid-to-disagree
+pip install -e . vllm
+python -m data.build_questions --config configs/data.yaml
+python -m council.check_members --data data/processed/arc_challenge.jsonl --n 50
+```
+
+Each member must show `invalid` under 5% on the dev set before moving on. Outputs go to `runs/<run_id>/`.
+
 ## Status
 
 - [x] C1 question data
 - [x] C2 pressure conditions
-- [ ] C3 council members
-- [ ] C4 protocols
+- [x] C3 council members (GPU check pending)
+- [x] C4 protocols (GPU check pending)
 - [ ] C5 aggregators
 - [ ] C6 rewards
 - [ ] C7 training

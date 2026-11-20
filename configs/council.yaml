@@ -1,0 +1,28 @@
+# C3/C4 council. Models are gated on Hugging Face (Llama, Gemma): accept each licence on
+# the model page and add HF_TOKEN as a Kaggle secret before the first run.
+generation:
+  temperature: 0.0          # eval default; GRPO sampling sets its own (0.6-1.0)
+  max_tokens: 256
+  seed: 0
+  token_prob_fallback: true # fill missing peer_prediction from option-token probabilities
+  always_option_probs: false
+
+members:
+  - name: qwen
+    backend:
+      model: Qwen/Qwen2.5-1.5B-Instruct
+      dtype: half               # T4 has no bf16
+      gpu_memory_utilization: 0.85   # one model at a time in check_members; lower to ~0.28 to co-load all 3
+      max_model_len: 2048
+  - name: llama
+    backend:
+      model: meta-llama/Llama-3.2-1B-Instruct
+      dtype: half
+      gpu_memory_utilization: 0.85
+      max_model_len: 2048
+  - name: gemma
+    backend:
+      model: google/gemma-3-1b-it
+      dtype: half
+      gpu_memory_utilization: 0.85
+      max_model_len: 2048
