@@ -40,6 +40,20 @@ python -m council.check_members --data data/processed/arc_challenge.jsonl --n 50
 
 Each member must show `invalid` under 5% on the dev set before moving on. Outputs go to `runs/<run_id>/`.
 
+## Round-robin GRPO training (Kaggle, GPU)
+
+One member is trained at a time against frozen peers; progress is kept in `runs/<experiment>/state.json`, so each step can run in a separate Kaggle session. Copy the `runs/<experiment>/` folder between sessions (e.g. as a Kaggle dataset).
+
+```bash
+pip install -e . unsloth vllm trl
+python -m train.grpo_roundrobin cache  --config configs/train.yaml               # all members, once
+python -m train.grpo_roundrobin train  --config configs/train.yaml               # next leg (e.g. round 1, qwen)
+python -m train.grpo_roundrobin cache  --config configs/train.yaml --members qwen # refresh the member just trained
+python -m train.grpo_roundrobin status --config configs/train.yaml               # what's done, what's next
+```
+
+Each leg writes `monitor.jsonl` (dev accuracy, answer entropy, flip rate every 200 steps) and `reward_terms.jsonl` (every reward term) to `runs/<experiment>/round<r>_<member>/`.
+
 ## Status
 
 - [x] C1 question data
@@ -48,5 +62,5 @@ Each member must show `invalid` under 5% on the dev set before moving on. Output
 - [x] C4 protocols (GPU check pending)
 - [x] C5 aggregators (ISP / OW waiting for equations from Ai et al.)
 - [x] C6 rewards: CA, BTS, Pred, Calib, Flip, combined R (PTS / DMI waiting for formulas)
-- [ ] C7 training
+- [x] C7 round-robin GRPO (GPU run pending)
 - [ ] C8 evaluation

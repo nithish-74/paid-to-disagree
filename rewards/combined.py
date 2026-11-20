@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from rewards.bts import Dist, bts_info, prediction_score
-from rewards.ca import ca_batch
+from rewards.ca import PoolEntry, ca_batch
 
 TERMS = ("pp_cross", "bts_info", "pred", "calib", "flip", "oracle")
 
@@ -109,14 +109,19 @@ def default_calib_target(answer: str, task: RewardTask) -> float:
     return pooled.count(answer) / len(pooled) if pooled else 0.0
 
 
-def combined_rewards(tasks: list[RewardTask], cfg: RewardConfig, seed: int = 0) -> list[list[dict[str, float]]]:
-    """Reward terms and total for every sample: result[t][g] = {term: value, ..., "total", "invalid"}."""
+def combined_rewards(
+    tasks: list[RewardTask], cfg: RewardConfig, seed: int = 0, pool: list[PoolEntry] | None = None
+) -> list[list[dict[str, float]]]:
+    """Reward terms and total for every sample: result[t][g] = {term: value, ..., "total", "invalid"}.
+
+    `pool` (from the peer cache) supplies CA's different-question penalty pairs; see rewards/ca.py.
+    """
     if not cfg.oracle and any(t.gold is not None for t in tasks):
         raise ValueError("gold labels reached the reward but oracle=false")
     rng = random.Random(seed)
     own = [[s.answer if s.usable else None for s in t.samples] for t in tasks]
     peers = [[p.answer if p.usable else None for p in t.peers] for t in tasks]
-    pp_cross = ca_batch(own, peers, rng)
+    pp_cross = ca_batch(own, peers, rng, pool=pool, qids=[t.qid for t in tasks] if pool is not None else None)
 
     out: list[list[dict[str, float]]] = []
     for ti, task in enumerate(tasks):

@@ -1,0 +1,48 @@
+# C7 round-robin GRPO. One file per experiment; outputs go to runs/<experiment>/.
+experiment: cross_model_v1
+seed: 0
+council_config: configs/council.yaml
+reward_config: configs/reward.yaml
+
+# Training questions (split == train only). GSM8K is left out by default: numeric
+# peer_predictions from 1-2B models are weak; add it back as an ablation if wanted.
+train_data:
+  - data/processed/truthfulqa_mc1.jsonl
+  - data/processed/arc_challenge.jsonl
+  - data/processed/mmlu_pro.jsonl
+max_train_questions: 2000     # sampled with the seed; keeps cache + legs within Kaggle time
+conditions: [neutral, user_wrong, user_right, are_you_sure]   # ablation 6: drop user_right
+
+rotation: [qwen, llama, gemma]
+rounds: 2
+
+cache:                        # step 1: frozen peers' reports
+  n_samples: 3                # neutral samples per question (majority = Flip reference)
+  temperature: 0.7
+  gpu_memory_utilization: 0.85
+
+lora:
+  r: 8
+  alpha: 16
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+
+grpo:
+  num_generations: 8          # G (doc: 8-16)
+  max_completion_length: 256
+  max_prompt_length: 1024
+  learning_rate: 5.0e-6
+  temperature: 0.8            # doc: 0.6-1.0
+  beta: 0.0                   # no KL term to start
+  max_steps: 800              # doc: ~600-1000
+  per_device_train_batch_size: 8   # must be a multiple of num_generations
+  gradient_accumulation_steps: 4
+  logging_steps: 10
+  gpu_memory_utilization: 0.55
+  report_to: none             # or wandb
+  extra: {}                   # passed straight to GRPOConfig (e.g. optim: adamw_8bit)
+
+monitor:
+  every: 200
+  dev_n: 200                  # dev questions per check (taken from the train_data files' dev split)
+  max_acc_drop: 0.03
+  min_entropy: 0.5
