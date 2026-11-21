@@ -23,6 +23,6 @@ members:
   - name: gemma
     backend:
       model: google/gemma-3-1b-it
-      dtype: half
+      dtype: float32            # vLLM refuses Gemma 3 in fp16 (numerical instability); T4 has no bf16
       gpu_memory_utilization: 0.85
       max_model_len: 2048
