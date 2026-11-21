@@ -21,8 +21,11 @@ members:
       gpu_memory_utilization: 0.85
       max_model_len: 2048
   - name: gemma
+    # On a T4, vLLM cannot run Gemma 3: it rejects fp16 (numerical instability), the T4 has
+    # no bf16, and its float32 attention kernel needs more shared memory than the T4 has.
+    # So Gemma runs on plain transformers in float32 (slower, same weights).
     backend:
+      kind: transformers
       model: google/gemma-3-1b-it
-      dtype: float32            # vLLM refuses Gemma 3 in fp16 (numerical instability); T4 has no bf16
-      gpu_memory_utilization: 0.85
-      max_model_len: 2048
+      dtype: float32
+      batch_size: 32
