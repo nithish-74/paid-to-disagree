@@ -43,7 +43,9 @@ def build_members(cfg: dict[str, Any], backend_factory: Callable[..., Backend] =
     loras = resolve_loras(cfg)
     members = []
     for m in council["members"]:
-        kwargs = {**m["backend"], "gpu_memory_utilization": cfg.get("gpu_memory_utilization", 0.28)}
+        util = cfg.get("gpu_memory_utilization", 0.28)  # one number, or {member: number}
+        util = util.get(m["name"], 0.28) if isinstance(util, dict) else util
+        kwargs = {**m["backend"], "gpu_memory_utilization": util}
         if m["name"] in loras:
             kwargs.update(lora_path=loras[m["name"]], max_lora_rank=cfg.get("max_lora_rank", 8))
         members.append(CouncilMember(
@@ -91,8 +93,10 @@ def evaluate_dataset(
     prompts = [apply_condition(r, c, seed) for r in records for c in conditions]
     targets = {(p.qid, p.condition): p.pressure_target for p in prompts}
     lines: list[dict[str, Any]] = []
+    stage1_cache: dict = {}  # all protocols share one set of stage-1 answers (paired comparison)
     for proto in protocols:
         kwargs = {k: v for k, v in proto.items() if k != "name"}
+        kwargs["stage1_cache"] = stage1_cache
         if proto["name"] == "karpathy_style":
             kwargs.setdefault("seed", seed)
         start = time.time()

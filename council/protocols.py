@@ -7,13 +7,17 @@
                     for 1-2 rounds (Du et al.).
 
 All functions are batched over many questions (one model call per member per stage) and
-return one ProtocolResult per pressured prompt. Under are_you_sure, a member's stage1
+return one ProtocolResult per pressured prompt. Pass the same `stage1_cache` dict to
+several protocols over the same prompts and stage 1 is generated once and shared, so
+protocols are compared on identical first answers (and the GPU work drops by a third).
+Under are_you_sure, a member's stage1
 answer is its answer AFTER the "Are you sure?" turn; the first-turn answer is kept in
 stage "stage1_initial" so flips can be measured.
 """
 
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -72,7 +76,12 @@ def _member_turns(member: CouncilMember, prompts: list[PressuredPrompt], records
     return [(t[-1], t[0] if len(t) > 1 else None) for t in turns]
 
 
-def _stage1(prompts, records, members) -> tuple[list[ProtocolResult], list[list[MemberOutput]]]:
+def _stage1(prompts, records, members, cache=None) -> tuple[list[ProtocolResult], list[list[MemberOutput]]]:
+    """Stage-1 results + member outputs. With a cache dict, computed once per prompt list."""
+    key = (tuple((p.qid, p.condition) for p in prompts), tuple(m.name for m in members))
+    if cache is not None and key in cache:
+        results, finals = cache[key]
+        return copy.deepcopy(results), finals
     per_member = [_member_turns(m, prompts, records) for m in members]
     results, finals = [], []
     for qi, p in enumerate(prompts):
@@ -84,6 +93,8 @@ def _stage1(prompts, records, members) -> tuple[list[ProtocolResult], list[list[
             res.stages["stage1_initial"] = [o.to_dict() for o in initial]
         results.append(res)
         finals.append(final)
+    if cache is not None:
+        cache[key] = (copy.deepcopy(results), finals)
     return results, finals
 
 
@@ -104,9 +115,12 @@ def question_turn(p: PressuredPrompt) -> Message:
 
 
 def independent(
-    prompts: list[PressuredPrompt], records: dict[str, Record], members: list[CouncilMember]
+    prompts: list[PressuredPrompt],
+    records: dict[str, Record],
+    members: list[CouncilMember],
+    stage1_cache: dict | None = None,
 ) -> list[ProtocolResult]:
-    results, _ = _stage1(prompts, records, members)
+    results, _ = _stage1(prompts, records, members, stage1_cache)
     return results
 
 
@@ -115,10 +129,11 @@ def debate(
     records: dict[str, Record],
     members: list[CouncilMember],
     rounds: int = 1,
+    stage1_cache: dict | None = None,
 ) -> list[ProtocolResult]:
     if rounds not in (1, 2):
         raise ValueError("rounds must be 1 or 2")
-    results, current = _stage1(prompts, records, members)
+    results, current = _stage1(prompts, records, members, stage1_cache)
     for r in range(1, rounds + 1):
         new: list[list[MemberOutput | None]] = [[None] * len(members) for _ in prompts]
         for mi, member in enumerate(members):
@@ -174,6 +189,7 @@ def karpathy_style(
     members: list[CouncilMember],
     chairman: CouncilMember | None = None,
     seed: int = 0,
+    stage1_cache: dict | None = None,
 ) -> list[ProtocolResult]:
     """Stage 1 answers -> stage 2 anonymised peer ranking -> stage 3 chairman answer.
 
@@ -181,7 +197,7 @@ def karpathy_style(
     seeded random order, labelled "Response 1..k", so position and identity are hidden.
     """
     chairman = chairman or members[0]
-    results, stage1 = _stage1(prompts, records, members)
+    results, stage1 = _stage1(prompts, records, members, stage1_cache)
     k = len(members)
 
     # orders[mi][qi] = member indices in the order ranker mi saw them
@@ -238,7 +254,7 @@ def run_protocol(
     **kwargs: Any,
 ) -> list[ProtocolResult]:
     if name == "independent":
-        return independent(prompts, records, members)
+        return independent(prompts, records, members, **kwargs)
     if name == "karpathy_style":
         return karpathy_style(prompts, records, members, **kwargs)
     if name == "debate":

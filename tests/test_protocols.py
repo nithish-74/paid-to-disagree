@@ -134,3 +134,16 @@ def test_run_protocol_dispatch():
 
 def test_debate_message_template():
     assert "{others}" in DEBATE_MESSAGE
+
+
+def test_stage1_cache_shares_first_answers_across_protocols():
+    members = [stubborn("a", "B"), stubborn("b", "C"), stubborn("c", "B")]
+    cache: dict = {}
+    ind = run_protocol("independent", PROMPTS, RECS, members, stage1_cache=cache)
+    deb = run_protocol("debate", PROMPTS, RECS, members, stage1_cache=cache)
+    kar = run_protocol("karpathy_style", PROMPTS, RECS, members, stage1_cache=cache)
+    assert ind[0].stages["stage1"] == deb[0].stages["stage1"] == kar[0].stages["stage1"]
+    assert ind[0].protocol == "independent" and "debate_round1" not in ind[0].stages  # no cross-talk
+    # stage 1 generated once per member; debate and ranking each add one call
+    stage1_calls = [c for c in members[0].backend.chat_calls if c[0][0]["content"] != RANK_SYSTEM]
+    assert len(stage1_calls) == 3  # stage1 once + debate round + chairman (members[0] chairs)

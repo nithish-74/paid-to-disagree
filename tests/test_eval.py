@@ -152,3 +152,13 @@ def test_resolve_loras_and_build_members(tmp_path):
     members = build_members({"council_config": str(council), "seed": 2, "loras_from_state": str(state)},
                             backend_factory=lambda **kw: seen.update(kw) or FakeBackend(lambda c: "x"))
     assert members[0].seed == 2 and seen["lora_path"] == "L1" and math.isclose(seen["gpu_memory_utilization"], 0.28)
+
+
+def test_build_members_per_member_gpu_share(tmp_path):
+    council = tmp_path / "council.yaml"
+    council.write_text("members:\n  - {name: qwen, backend: {model: m}}\n  - {name: gemma, backend: {model: g}}\n",
+                       encoding="utf-8")
+    seen = []
+    build_members({"council_config": str(council), "seed": 0, "gpu_memory_utilization": {"gemma": 0.38}},
+                  backend_factory=lambda **kw: seen.append(kw) or FakeBackend(lambda c: "x"))
+    assert [kw["gpu_memory_utilization"] for kw in seen] == [0.28, 0.38]

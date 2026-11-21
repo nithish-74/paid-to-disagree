@@ -54,6 +54,14 @@ python -m train.grpo_roundrobin status --config configs/train.yaml              
 
 Each leg writes `monitor.jsonl` (dev accuracy, answer entropy, flip rate every 200 steps) and `reward_terms.jsonl` (every reward term) to `runs/<experiment>/round<r>_<member>/`.
 
+## Baseline on Kaggle (notebook)
+
+`kaggle/baseline_eval.ipynb` does the whole untrained baseline in one go: install, model access
+(HF_TOKEN secret or Unsloth's ungated mirrors), data, the Phase 1 member check, a 5-question smoke
+eval, then seeds 0-2 on the full test splits (one seed per GPU on T4 x2), metrics and the
+seed-combined tables, zipped as `eval_untrained.zip`. Open it on Kaggle via File -> Import Notebook,
+set GPU T4 x2 and Internet on, run steps 1-5 interactively, then Save & Run All (Commit).
+
 ## Evaluation
 
 ```bash
@@ -61,7 +69,13 @@ python -m eval.run_eval --config configs/eval.yaml --seed 0 --run-id eval_untrai
 python -m eval.metrics runs/eval_untrained_seed0                                            # CPU is fine
 ```
 
-`run_eval` writes one line per member output to `runs/<run_id>/members.jsonl`; `metrics` writes `members.csv`, `flips.csv`, `pairwise.csv` and `aggregation.csv` (95% bootstrap CIs) to `runs/<run_id>/metrics/`. Run seeds 0, 1 and 2 for every headline number. For the trained council, set `loras_from_state` in `configs/eval.yaml`.
+`run_eval` writes one line per member output to `runs/<run_id>/members.jsonl`; `metrics` writes `members.csv`, `flips.csv`, `pairwise.csv` and `aggregation.csv` (95% bootstrap CIs) to `runs/<run_id>/metrics/`. Run seeds 0, 1 and 2 for every headline number. For the trained council, set `loras_from_state` in `configs/eval.yaml`. Combine seeds with:
+
+```bash
+python -m analysis.combine_seeds runs/eval_untrained_seed0 runs/eval_untrained_seed1 runs/eval_untrained_seed2 --out runs/eval_untrained_combined
+```
+
+which reports, per metric, the mean over seeds, the 95% t-interval across seeds and the widest per-seed bootstrap interval.
 
 ## Status
 
