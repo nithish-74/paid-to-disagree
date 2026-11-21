@@ -98,16 +98,26 @@ def evaluate_dataset(
         start = time.time()
         for res in run_protocol(proto["name"], prompts, recs, members, **kwargs):
             lines += flatten(res, dataset, targets[(res.qid, res.condition)], meta)
-        print(f"  {dataset:16s} {proto['name']:15s} {len(prompts)} prompts  {time.time() - start:.0f}s")
+        print(f"  {dataset:16s} {proto['name']:15s} {len(prompts)} prompts  {time.time() - start:.0f}s", flush=True)
     return lines
 
 
-def run(cfg: dict[str, Any], out_dir: Path, members: list[CouncilMember]) -> int:
+def done_datasets(members_path: Path) -> set[str]:
+    """Datasets already fully written to members.jsonl (each dataset is written in one go)."""
+    if not members_path.exists():
+        return set()
+    with members_path.open(encoding="utf-8") as f:
+        return {json.loads(line)["dataset"] for line in f if line.strip()}
+
+
+def run(cfg: dict[str, Any], out_dir: Path, members: list[CouncilMember], resume: bool = False) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "config.json").write_text(json.dumps({**cfg, "loras_resolved": resolve_loras(cfg)}, indent=2), encoding="utf-8")
     meta = {"run_id": cfg["run_id"], "seed": cfg["seed"]}
     members_path = out_dir / "members.jsonl"
-    members_path.unlink(missing_ok=True)
+    done = done_datasets(members_path) if resume else set()
+    if not resume:
+        members_path.unlink(missing_ok=True)
     all_questions: list[Record] = []
     n_lines = 0
     for path in cfg["datasets"]:
@@ -117,6 +127,9 @@ def run(cfg: dict[str, Any], out_dir: Path, members: list[CouncilMember]) -> int
         if not records:
             continue
         all_questions += records
+        if records[0]["source"] in done:
+            print(f"  {records[0]['source']:16s} already in {members_path}, skipping (--resume)", flush=True)
+            continue
         lines = evaluate_dataset(records, members, cfg["protocols"], cfg["conditions"], cfg["seed"], meta)
         with members_path.open("a", encoding="utf-8") as f:
             for line in lines:
@@ -133,6 +146,7 @@ def main() -> None:
     parser.add_argument("--config", default="configs/eval.yaml")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--run-id")
+    parser.add_argument("--resume", action="store_true", help="keep members.jsonl and skip finished datasets")
     args = parser.parse_args()
     with open(args.config, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
@@ -141,7 +155,7 @@ def main() -> None:
     if args.run_id:
         cfg["run_id"] = args.run_id
     out_dir = Path("runs") / cfg["run_id"]
-    n = run(cfg, out_dir, build_members(cfg))
+    n = run(cfg, out_dir, build_members(cfg), resume=args.resume)
     print(f"wrote {n} lines -> {out_dir / 'members.jsonl'}; next: python -m eval.metrics {out_dir}")
 
 

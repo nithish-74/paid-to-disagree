@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import math
 import re
+import sys
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol
@@ -305,6 +307,7 @@ class TransformersBackend:
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.offload = offload and self.device != "cpu"
         self.batch_size = batch_size
+        self.name = model.split("/")[-1]
         self.tok = AutoTokenizer.from_pretrained(model)
         self.tok.padding_side = "left"
         if self.tok.pad_token is None:
@@ -331,7 +334,11 @@ class TransformersBackend:
 
     def chat(self, conversations, temperature, max_tokens, seed=None):
         texts = [self.tok.apply_chat_template(c, tokenize=False, add_generation_prompt=True) for c in conversations]
+        # Batch prompts of similar length together: less padding, so less GPU memory per batch.
+        order = sorted(range(len(texts)), key=lambda j: len(texts[j]))
+        texts = [texts[j] for j in order]
         out: list[str] = []
+        start = time.time()
         self._on_device()
         try:
             for i in range(0, len(texts), self.batch_size):
@@ -348,7 +355,11 @@ class TransformersBackend:
                 out += self.tok.batch_decode(gen[:, enc["input_ids"].shape[1] :], skip_special_tokens=True)
         finally:
             self._off_device()
-        return out
+        print(f"    [{self.name}] {len(texts)} replies in {time.time() - start:.0f}s", file=sys.stderr, flush=True)
+        restored = [""] * len(out)
+        for pos, j in enumerate(order):
+            restored[j] = out[pos]
+        return restored
 
     def next_token_probs(self, conversations, assistant_prefix, candidates):
         texts = [
