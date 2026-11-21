@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "paid-to-disagree"
 version = "0.1.0"
@@ -7,6 +11,9 @@ dependencies = ["datasets>=2.18", "pyyaml>=6.0"]
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 # GPU-only (Kaggle/Colab): vllm, trl, unsloth, peft. Install there, not on Windows.
+
+[tool.setuptools.packages.find]
+include = ["data*", "council*", "rewards*", "train*", "eval*", "analysis*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

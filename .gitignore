@@ -7,3 +7,4 @@ runs/*
 data/processed/
 wandb/
 .ipynb_checkpoints/
+*.egg-info/
