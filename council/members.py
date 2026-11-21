@@ -304,6 +304,8 @@ class TransformersBackend:
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.torch = torch
+        if device == "last":  # e.g. Gemma on its own GPU when two are visible; cuda:0 when only one
+            device = f"cuda:{torch.cuda.device_count() - 1}" if torch.cuda.is_available() else "cpu"
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.offload = offload and self.device != "cpu"
         self.batch_size = batch_size

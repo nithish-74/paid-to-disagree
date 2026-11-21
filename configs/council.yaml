@@ -29,3 +29,4 @@ members:
       model: google/gemma-3-1b-it
       dtype: float32
       batch_size: 32
+      device: last              # its own GPU on Kaggle T4 x2 (vLLM members use GPU 0)
