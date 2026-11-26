@@ -28,6 +28,16 @@ from rewards.combined import Report
 
 Sample = dict[str, Any]
 
+# Who counts as a "peer" in the reward (architecture doc, ablation 3 "Population" and baseline B9):
+#   cross_model   the other council members (frozen), the main method
+#   single_model  frozen copies of the trained member itself, i.e. its own cached samples
+POPULATIONS = ("cross_model", "single_model")
+
+
+def check_population(population: str) -> None:
+    if population not in POPULATIONS:
+        raise ValueError(f"population must be one of {POPULATIONS}, got {population!r}")
+
 
 class PeerCache:
     def __init__(self, entries: dict[tuple[str, str], list[Sample]] | None = None) -> None:
@@ -66,14 +76,34 @@ class PeerCache:
     def peer_names(self, member: str) -> list[str]:
         return [m for m in self.members if m != member]
 
-    def peers_for(self, member: str, qid: str) -> list[Report]:
-        """Frozen peers' reports, always in the same (sorted) peer order."""
+    def n_samples(self, member: str) -> int:
+        return max((len(v) for (m, _), v in self.entries.items() if m == member), default=0)
+
+    def _own_samples(self, member: str, qid: str) -> list[Sample]:
+        """This member's cached samples, padded with invalid ones to a fixed count per question."""
+        samples = self.samples(member, qid)
+        return samples + [{"answer": None, "valid": False}] * (self.n_samples(member) - len(samples))
+
+    def peers_for(self, member: str, qid: str, population: str = "cross_model") -> list[Report]:
+        """Frozen peers' reports, always in the same order.
+
+        cross_model: the other members' majority reports (sorted peer order).
+        single_model: frozen copies of this member, i.e. each of its own cached samples (B9).
+        """
+        check_population(population)
+        if population == "single_model":
+            return [Report.from_output(s) for s in self._own_samples(member, qid)]
         return [self.report(p, qid) for p in self.peer_names(member)]
 
     def neutral_majority(self, member: str, qid: str) -> str | None:
         return self.majority(member, qid)
 
-    def pool(self, member: str) -> list[PoolEntry]:
+    def pool(self, member: str, population: str = "cross_model") -> list[PoolEntry]:
+        check_population(population)
+        if population == "single_model":
+            return [(q, self.majority(member, q),
+                     [s["answer"] if s.get("valid") else None for s in self._own_samples(member, q)])
+                    for q in self.qids if (member, q) in self.entries]
         peers = self.peer_names(member)
         return [(q, self.majority(member, q), [self.majority(p, q) for p in peers]) for q in self.qids]
 

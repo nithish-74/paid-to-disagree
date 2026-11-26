@@ -44,11 +44,14 @@ def make_reward_fn(
     log_path: Path | None = None,
     seed: int = 0,
     golds: dict[str, str] | None = None,
+    population: str = "cross_model",
 ) -> Callable[..., list[float]]:
+    """population: "cross_model" (peers = the other frozen members) or "single_model"
+    (peers = frozen copies of this member, baseline B9); see train/peer_cache.py."""
     if golds and not cfg.oracle:
         raise ValueError("golds given but oracle=false: labels must not reach the reward")
     safe = strip_gold(records)
-    pool = cache.pool(member)
+    pool = cache.pool(member, population)
     state = {"calls": 0}
 
     def peer_prediction_reward(prompts, completions, row_id, qid, condition, pressure_target, **kwargs) -> list[float]:
@@ -70,7 +73,7 @@ def make_reward_fn(
                 condition=condition[i0],
                 keys=keys,
                 samples=samples,
-                peers=cache.peers_for(member, qid[i0]),
+                peers=cache.peers_for(member, qid[i0], population),
                 pressure_target=pressure_target[i0] or None,
                 neutral_majority=cache.neutral_majority(member, qid[i0]),
                 gold=golds.get(qid[i0]) if (cfg.oracle and golds) else None,

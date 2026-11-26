@@ -121,6 +121,18 @@ def member_cfg(council: dict[str, Any], name: str) -> dict[str, Any]:
     raise KeyError(f"member {name!r} not in council config")
 
 
+def training_population(cfg: dict[str, Any]) -> str:
+    """cross_model (default): peers are the other frozen members. single_model (B9): peers
+    are frozen copies of the trained member, so only the rotation's members need caching."""
+    from train.peer_cache import check_population
+
+    population = cfg.get("population", "cross_model")
+    check_population(population)
+    if population == "cross_model" and len(cfg["rotation"]) < 2:
+        raise ValueError("cross_model training needs at least 2 members in the rotation")
+    return population
+
+
 # ================================================================ GPU backends
 
 
@@ -196,6 +208,7 @@ def cmd_train(cfg: dict[str, Any], member_name: str | None, round_: int | None) 
     out = exp_dir(cfg)
     state_path = out / "state.json"
     state = load_state(state_path)
+    population = training_population(cfg)
     leg = (round_, member_name) if member_name and round_ else next_leg(state, cfg["rotation"], cfg["rounds"])
     if leg is None:
         print("all rounds done")
@@ -215,7 +228,7 @@ def cmd_train(cfg: dict[str, Any], member_name: str | None, round_: int | None) 
     dev_ps, dev_targets = dev_prompts(dev_recs, cfg["seed"])
     dev_map = {r["qid"]: r for r in dev_recs}
     leg_dir = out / f"round{round_}_{member_name}"
-    print(f"leg: round {round_}, member {member_name}, {len(rows)} training rows -> {leg_dir}")
+    print(f"leg: round {round_}, member {member_name}, population {population}, {len(rows)} training rows -> {leg_dir}")
 
     start_lora = state["loras"].get(member_name)
     g = cfg["grpo"]
@@ -265,7 +278,7 @@ def cmd_train(cfg: dict[str, Any], member_name: str | None, round_: int | None) 
             return control
 
     reward_fn = make_reward_fn(cache, member_name, {r["qid"]: r for r in train_recs}, rcfg,
-                               log_path=leg_dir / "reward_terms.jsonl", seed=cfg["seed"])
+                               log_path=leg_dir / "reward_terms.jsonl", seed=cfg["seed"], population=population)
     trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,
@@ -282,7 +295,7 @@ def cmd_train(cfg: dict[str, Any], member_name: str | None, round_: int | None) 
     else:
         final = save("final")
     state["loras"][member_name] = final
-    state["legs"].append({"round": round_, "member": member_name, "lora": final,
+    state["legs"].append({"round": round_, "member": member_name, "lora": final, "population": population,
                           "stop_reason": monitor.stop_reason, "monitor": monitor.stopper.history})
     save_state(state, state_path)
     print(f"done: {member_name} round {round_} -> {final}. Next: refresh the cache for {member_name}.")

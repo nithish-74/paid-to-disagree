@@ -171,6 +171,54 @@ def test_reward_fn_never_sees_gold():
     assert right > wrong
 
 
+# ---------------------------------------------------------------- B9: single-model population
+
+
+def test_single_model_peers_are_own_frozen_samples():
+    cache = make_cache()
+    assert [p.answer for p in cache.peers_for("qwen", "q0", "single_model")] == ["B", "B", "C"]
+    assert [p.answer for p in cache.peers_for("gemma", "q0", "single_model")] == ["C", "A", "A"]
+    # cross_model (default) is unchanged: the other members' majorities
+    assert [p.answer for p in cache.peers_for("qwen", "q0")] == ["A", "B"]
+    # a question with fewer samples is padded with invalid peers, so the peer count stays fixed
+    cache.entries[("qwen", "q1")] = [sample("D")]
+    peers = cache.peers_for("qwen", "q1", "single_model")
+    assert [p.answer for p in peers] == ["D", None, None] and [p.usable for p in peers] == [True, False, False]
+    with pytest.raises(ValueError):
+        cache.peers_for("qwen", "q0", "same_family")
+
+
+def test_single_model_pool_uses_own_samples():
+    cache = make_cache()
+    pool = cache.pool("qwen", "single_model")
+    assert len(pool) == 6 and pool[0] == ("q0", "B", ["B", "B", "C"])
+    assert cache.pool("qwen")[0] == ("q0", "B", ["A", "B"])
+
+
+def test_reward_fn_single_model_needs_only_the_trained_member():
+    cache = PeerCache({k: v for k, v in make_cache().entries.items() if k[0] == "qwen"})
+    rows = [r for r in build_rows(RECS[:2], "qwen", cache) if r["condition"] == "neutral"]
+    fn = make_reward_fn(cache, "qwen", {r["qid"]: r for r in RECS}, RewardConfig(), population="single_model")
+    agree, odd = _trl_call(fn, rows[:1], [[answer_json("B", 0.8, PP), answer_json("D", 0.8, PP)]])
+    assert agree > odd  # agreeing with its own frozen majority pays under CA, as with peers
+    with pytest.raises(ValueError):
+        make_reward_fn(cache, "qwen", {}, RewardConfig(), population="nope")
+
+
+def test_b9_configs():
+    from train.grpo_roundrobin import load_yaml, training_population
+
+    b9 = load_yaml("configs/train_b9.yaml")
+    assert training_population(b9) == "single_model" and b9["rotation"] == ["qwen"] and b9["rounds"] == 1
+    assert training_population(load_yaml("configs/train.yaml")) == "cross_model"
+    rcfg = RewardConfig.from_dict(load_yaml(b9["reward_config"]))
+    assert (rcfg.l1_pp_cross, rcfg.l4_calib, rcfg.l5_flip) == (0.0, 0.0, 0.0)  # BTS terms only
+    assert rcfg.l2_bts_info > 0 and rcfg.l3_pred > 0 and not rcfg.oracle
+    grpo_args(b9, __import__("pathlib").Path("runs/x"))  # batch / generation sizes are consistent
+    with pytest.raises(ValueError):
+        training_population({**b9, "population": "cross_model"})  # cross-model needs >= 2 members
+
+
 def test_completion_text():
     assert completion_text("x") == "x"
     assert completion_text([{"role": "assistant", "content": "y"}]) == "y"

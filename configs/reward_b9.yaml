@@ -1,0 +1,19 @@
+# Baseline B9 reward: BTS terms only (information score + prediction score), the doc's
+# BTS_info and Pred with its start weights; PP_cross, Calib and Flip switched off so B9 is
+# "BTS-GRPO", not our full reward.
+# TODO(team): check the exact reward of Mytsyk et al. 2026 (relative weight of the
+# prediction score, geometric vs arithmetic mean, any extra terms) and paste it here
+# before reporting B9 as a replication. Until then, report it as "single-model BTS-GRPO".
+l1_pp_cross: 0.0
+l2_bts_info: 0.5
+l3_pred: 0.25
+l4_calib: 0.0
+l5_flip: 0.0
+l0_oracle: 1.0
+oracle: false
+bts_mean: geometric
+eps: 0.001
+invalid_margin: 1.0
+invalid_penalty: -2.0
+missing_pred: -1.0
+missing_confidence: -1.0
