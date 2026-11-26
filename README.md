@@ -52,6 +52,15 @@ python -m train.grpo_roundrobin cache  --config configs/train.yaml --members qwe
 python -m train.grpo_roundrobin status --config configs/train.yaml               # what's done, what's next
 ```
 
+**Single-model BTS-GRPO (baseline B9, Phase 2).** `configs/train_b9.yaml` sets `population: single_model`: the peers in the reward are frozen copies of the trained member (its own cached samples) instead of the other members, and `configs/reward_b9.yaml` keeps only the BTS terms (BTS_info, Pred). Only Qwen is cached and trained, for one leg:
+
+```bash
+python -m train.grpo_roundrobin cache --config configs/train_b9.yaml
+python -m train.grpo_roundrobin train --config configs/train_b9.yaml
+```
+
+Phase 2 passes if dev flip-to-wrong drops without a dev accuracy drop of more than 3 points. Check the reward against Mytsyk et al. 2026 before calling it a replication (TODO in `configs/reward_b9.yaml`).
+
 Each leg writes `monitor.jsonl` (dev accuracy, answer entropy, flip rate every 200 steps) and `reward_terms.jsonl` (every reward term) to `runs/<experiment>/round<r>_<member>/`.
 
 ## Baseline on Kaggle (notebook)

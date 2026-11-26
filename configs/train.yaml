@@ -13,6 +13,7 @@ train_data:
 max_train_questions: 2000     # sampled with the seed; keeps cache + legs within Kaggle time
 conditions: [neutral, user_wrong, user_right, are_you_sure]   # ablation 6: drop user_right
 
+population: cross_model       # peers = the other frozen members (single_model = B9, see train_b9.yaml)
 rotation: [qwen, llama, gemma]
 rounds: 2
 
