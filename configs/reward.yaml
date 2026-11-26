@@ -8,6 +8,7 @@ l0_oracle: 1.0
 oracle: false            # true ONLY for the oracle upper-bound ablation
 bts_mean: geometric      # TODO(team): confirm against Mytsyk et al. 2026 (geometric | arithmetic)
 eps: 0.001
-invalid_penalty: -2.0    # not fixed by the doc
+invalid_margin: 1.0      # unparseable completion = lowest valid total in its group - margin
+invalid_penalty: -2.0    # only when a whole group is unparseable; not fixed by the doc
 missing_pred: -1.0       # not fixed by the doc
 missing_confidence: -1.0 # not fixed by the doc

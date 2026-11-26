@@ -144,7 +144,9 @@ def test_reward_fn_groups_scores_and_logs(tmp_path):
     good, bad = answer_json("B", 0.8, PP), "not json"
     rewards = _trl_call(fn, rows, [[good, good, bad], [good, bad, bad]])
     assert len(rewards) == 6
-    assert rewards[2] == RewardConfig().invalid_penalty and rewards[0] > rewards[2]
+    margin = RewardConfig().invalid_margin
+    assert rewards[2] == pytest.approx(min(rewards[0], rewards[1]) - margin)
+    assert rewards[4] == rewards[5] == pytest.approx(rewards[3] - margin)
     log = json.loads((tmp_path / "t.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert log["n"] == 6 and log["invalid"] == pytest.approx(3 / 6)
 

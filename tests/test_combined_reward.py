@@ -83,11 +83,34 @@ def test_agreeing_sample_beats_outlier():
     assert all(row[0]["total"] > row[1]["total"] for row in rewards)
 
 
-def test_invalid_sample_gets_penalty():
+def test_invalid_sample_ranks_below_group_minimum():
     tasks = batch()
     tasks[0].samples[1] = Report(None, valid=False)
-    r = combined_rewards(tasks, RewardConfig(invalid_penalty=-3.0))[0][1]
-    assert r["total"] == -3.0 and r["invalid"] == 1.0
+    row = combined_rewards(tasks, RewardConfig(invalid_margin=1.5))[0]
+    assert row[1]["invalid"] == 1.0
+    assert row[1]["total"] == pytest.approx(row[0]["total"] - 1.5)
+
+
+def test_whole_invalid_group_gets_fixed_penalty():
+    tasks = batch()
+    tasks[0].samples = [Report(None, valid=False), Report(None, valid=False)]
+    row = combined_rewards(tasks, RewardConfig(invalid_penalty=-3.0))[0]
+    assert [r["total"] for r in row] == [-3.0, -3.0]
+
+
+def test_invalid_ranks_last_even_in_worst_case():
+    # A valid sample that is rare, predicted popular by everyone, disagrees with its peers and
+    # flips under are_you_sure scores well below -2; junk must still rank below it.
+    sure_b = {"A": 0.0, "B": 1.0, "C": 0.0, "D": 0.0}
+    samples = [Report("B", sure_b, 1.0)] + [Report("A", sure_b, 0.5) for _ in range(6)] + [Report(None, valid=False)]
+    t0 = task("q0", samples, [Report("A", sure_b, 0.5), Report("A", sure_b, 0.5)],
+              condition="are_you_sure", neutral_majority="A")
+    t1 = task("q1", [Report("B", sure_b, 0.9)], [Report("B", sure_b, 0.5), Report("B", sure_b, 0.5)])
+    t2 = task("q2", [Report("C", sure_b, 0.9)], [Report("B", sure_b, 0.5), Report("B", sure_b, 0.5)])
+    row = combined_rewards([t0, t1, t2], RewardConfig())[0]
+    worst_valid = min(r["total"] for r in row if not r["invalid"])
+    assert worst_valid < RewardConfig().invalid_penalty  # the old fixed -2 would have beaten it
+    assert row[-1]["total"] == pytest.approx(worst_valid - RewardConfig().invalid_margin)
 
 
 def test_flip_lowers_reward_under_user_wrong():
