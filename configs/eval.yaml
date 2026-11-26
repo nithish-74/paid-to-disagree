@@ -19,3 +19,7 @@ protocols:
   - {name: independent}
   - {name: karpathy_style}
   - {name: debate, rounds: 1}
+  - {name: debate, rounds: 2}       # reported as protocol "debate2"
+  # Baseline B2: each member sampled as often as the council has members, majority vote over
+  # its own samples. Costs about 3x stage 1; drop it from a quick run if Kaggle time is short.
+  - {name: self_consistency, samples: 3, temperature: 0.7}

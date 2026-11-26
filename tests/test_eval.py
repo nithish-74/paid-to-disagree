@@ -162,3 +162,62 @@ def test_build_members_per_member_gpu_share(tmp_path):
     build_members({"council_config": str(council), "seed": 0, "gpu_memory_utilization": {"gemma": 0.38}},
                   backend_factory=lambda **kw: seen.append(kw) or FakeBackend(lambda c: "x"))
     assert [kw["gpu_memory_utilization"] for kw in seen] == [0.28, 0.38]
+
+
+# ---------------------------------------------------------------- B2 self-consistency + 2-round debate
+
+
+class SeedBackend(FakeBackend):
+    """Sampling stand-in: the answer depends on the seed (B on seeds 0 and 1 mod 3, else C)."""
+
+    def __init__(self):
+        super().__init__(lambda c: "")
+        self.calls = []
+
+    def chat(self, conversations, temperature, max_tokens, seed=None):
+        self.calls.append((temperature, seed))
+        if conversations and conversations[0][0]["content"] == RANK_SYSTEM:
+            return [json.dumps({"ranking": [1, 2, 3]})] * len(conversations)
+        letter = "B" if (seed or 0) % 3 in (0, 1) else "C"
+        return [answer_json(letter, 0.9, PP)] * len(conversations)
+
+
+def test_self_consistency_samples_per_member():
+    from council.protocols import self_consistency
+    from data.pressure import apply_condition
+
+    backend = SeedBackend()
+    member = CouncilMember("solo", backend)
+    prompts = [apply_condition(q, "neutral") for q in QS[:2]] + [apply_condition(QS[0], "are_you_sure")]
+    res = self_consistency(prompts, {q["qid"]: q for q in QS}, [member], samples=3, temperature=0.7, seed=0)
+    assert len(res) == 3 and {r.protocol for r in res} == {"self_consistency_solo"}
+    assert [o["member"] for o in res[0].stages["stage1"]] == ["solo#s0", "solo#s1", "solo#s2"]
+    assert [o["answer"] for o in res[0].stages["stage1"]] == ["B", "B", "C"]
+    assert "stage1_initial" in res[2].stages and "stage1_initial" not in res[0].stages
+    assert {t for t, _ in backend.calls} == {0.7}
+    assert member.stats.n == 0 and member.temperature == 0.0  # original member untouched
+    with pytest.raises(ValueError):
+        self_consistency(prompts, {}, [member], temperature=0.0)
+
+
+def test_eval_with_b2_and_two_round_debate(tmp_path):
+    data = tmp_path / "arc.jsonl"
+    save_jsonl(QS, data)
+    cfg = {"run_id": "t", "seed": 0, "datasets": [str(data)], "split": "test", "n": 0,
+           "conditions": ["neutral", "user_wrong"],
+           "protocols": [{"name": "independent"}, {"name": "debate", "rounds": 1}, {"name": "debate", "rounds": 2},
+                         {"name": "self_consistency", "samples": 3, "temperature": 0.7}]}
+    members = [scripted("honest", "B"), scripted("sycophant", "B", caves=True),
+               CouncilMember("sampler", SeedBackend())]
+    out = tmp_path / "run"
+    run(cfg, out, members)
+    lines = [json.loads(l) for l in (out / "members.jsonl").read_text(encoding="utf-8").splitlines()]
+    protocols = {l["protocol"] for l in lines}
+    assert {"debate", "debate2", "self_consistency_honest", "self_consistency_sampler"} <= protocols
+    assert {l["stage"] for l in lines if l["protocol"] == "debate2"} >= {"debate_round1", "debate_round2"}
+
+    tables = compute(out, n_boot=20)
+    b2 = {r["aggregator"]: r for r in pick(tables["aggregation"], protocol="self_consistency_sampler", condition="neutral")}
+    assert b2["majority_vote"]["accuracy"] == 1.0  # samples B, B, C -> B
+    council = pick(tables["members"], protocol="independent", condition="neutral")
+    assert {r["member"] for r in council} == {"honest", "sycophant", "sampler"}  # no "#s" samples in council cells

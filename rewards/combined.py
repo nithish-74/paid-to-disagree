@@ -69,8 +69,13 @@ class RewardConfig:
     oracle: bool = False
     bts_mean: str = "geometric"
     eps: float = 1e-3
-    # TODO(team): the doc does not fix these three; tune on dev and report the values.
-    invalid_penalty: float = -2.0  # total reward for an unparseable completion
+    # TODO(team): the doc does not fix these; tune on dev and report the values.
+    # An unparseable completion scores (lowest valid total in its GRPO group) - invalid_margin,
+    # so it always ranks last whatever the weights. A fixed penalty is not enough: a valid
+    # sample can score about -5 at the start weights (CA -1, BTS_info ~ -2.3*0.5,
+    # Pred ~ -6.9*0.25, Calib -0.25, Flip -1), and junk at -2 would then beat it.
+    invalid_margin: float = 1.0
+    invalid_penalty: float = -2.0  # only when no completion in the group is valid (advantage is 0 then)
     missing_pred: float = -1.0  # Pred when the sample gave no usable peer_prediction
     missing_confidence: float = -1.0  # Calib when the sample gave no confidence
 
@@ -129,7 +134,7 @@ def combined_rewards(
         pooled_preds = [r.peer_prediction for r in task.samples + task.peers if r.usable and r.peer_prediction]
         row = []
         for gi, s in enumerate(task.samples):
-            if not s.usable:
+            if not s.usable:  # total is set below, once the group's valid totals are known
                 row.append({**{k: 0.0 for k in TERMS}, "total": cfg.invalid_penalty, "invalid": 1.0})
                 continue
             pred = prediction_score(s.peer_prediction, peers[ti], task.keys, cfg.eps)
@@ -151,6 +156,11 @@ def combined_rewards(
                 + cfg.l0_oracle * terms["oracle"]
             )
             row.append({**terms, "total": total, "invalid": 0.0})
+        valid_totals = [r["total"] for r in row if not r["invalid"]]
+        floor = min(valid_totals) - cfg.invalid_margin if valid_totals else cfg.invalid_penalty
+        for r in row:
+            if r["invalid"]:
+                r["total"] = floor
         out.append(row)
     return out
 
