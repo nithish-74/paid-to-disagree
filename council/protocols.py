@@ -4,7 +4,11 @@
 2. karpathy_style   stage1, then each member ranks the anonymised answers (stage2_rank),
                     then a chairman writes the final answer (stage3_chairman).
 3. debate           stage1, then each member sees the others' answers and may revise,
-                    for 1-2 rounds (Du et al.).
+                    for 1-2 rounds (Du et al.). Labelled "debate" (1 round) or "debate2".
+4. self_consistency baseline B2: each member alone, sampled `samples` times at
+                    `temperature`; one result per member, labelled
+                    "self_consistency_<member>", whose stage1 holds the samples as
+                    "<member>#s0", "<member>#s1", ... so majority vote over the cell is B2.
 
 All functions are batched over many questions (one model call per member per stage) and
 return one ProtocolResult per pressured prompt. Pass the same `stage1_cache` dict to
@@ -18,14 +22,14 @@ stage "stage1_initial" so flips can be measured.
 from __future__ import annotations
 
 import copy
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
-from council.members import CouncilMember, MemberOutput, Request, extract_json_object
+from council.members import CouncilMember, MemberOutput, MemberStats, Request, extract_json_object
 from data.build_questions import Record, seeded_rng
 from data.pressure import Message, PressuredPrompt
 
-PROTOCOLS = ("independent", "karpathy_style", "debate")
+PROTOCOLS = ("independent", "karpathy_style", "debate", "self_consistency")
 
 DEBATE_MESSAGE = (
     "These are the current answers from the other council members:\n\n{others}\n\n"
@@ -159,8 +163,45 @@ def debate(
         for qi, res in enumerate(results):
             res.stages[f"debate_round{r}"] = [o.to_dict() for o in current[qi]]
     for res in results:
-        res.protocol = "debate"
+        res.protocol = "debate" if rounds == 1 else f"debate{rounds}"  # distinct cells in eval/metrics.py
         res.meta["rounds"] = rounds
+    return results
+
+
+def self_consistency(
+    prompts: list[PressuredPrompt],
+    records: dict[str, Record],
+    members: list[CouncilMember],
+    samples: int = 3,
+    temperature: float = 0.7,
+    seed: int = 0,
+    stage1_cache: dict | None = None,  # accepted for a uniform call; samples are never shared
+) -> list[ProtocolResult]:
+    """Baseline B2: rules out "more samples" as the explanation for council gains.
+
+    Each member answers alone `samples` times (default 3 = the council's size) with
+    sampling on, so majority vote over its own samples uses as many samples as the council.
+    Sampler copies get fresh stats, so the Phase 1 invalid-JSON rates stay temperature-0 only.
+    """
+    if samples < 1:
+        raise ValueError("samples must be >= 1")
+    if temperature <= 0:
+        raise ValueError("self_consistency needs temperature > 0, or every sample is identical")
+    results: list[ProtocolResult] = []
+    for member in members:
+        per_sample = []
+        for k in range(samples):
+            sampler = replace(member, name=f"{member.name}#s{k}", temperature=temperature,
+                              seed=seed * 1000 + k, stats=MemberStats())
+            per_sample.append(_member_turns(sampler, prompts, records))
+        for qi, p in enumerate(prompts):
+            res = ProtocolResult(p.qid, p.condition, f"self_consistency_{member.name}",
+                                 meta={"samples": samples, "temperature": temperature})
+            res.stages["stage1"] = [per_sample[k][qi][0].to_dict() for k in range(samples)]
+            initial = [per_sample[k][qi][1] for k in range(samples)]
+            if any(o is not None for o in initial):
+                res.stages["stage1_initial"] = [o.to_dict() for o in initial]
+            results.append(res)
     return results
 
 
@@ -259,4 +300,6 @@ def run_protocol(
         return karpathy_style(prompts, records, members, **kwargs)
     if name == "debate":
         return debate(prompts, records, members, **kwargs)
+    if name == "self_consistency":
+        return self_consistency(prompts, records, members, **kwargs)
     raise ValueError(f"unknown protocol {name!r}; expected one of {PROTOCOLS}")

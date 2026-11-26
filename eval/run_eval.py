@@ -97,7 +97,7 @@ def evaluate_dataset(
     for proto in protocols:
         kwargs = {k: v for k, v in proto.items() if k != "name"}
         kwargs["stage1_cache"] = stage1_cache
-        if proto["name"] == "karpathy_style":
+        if proto["name"] in ("karpathy_style", "self_consistency"):
             kwargs.setdefault("seed", seed)
         start = time.time()
         for res in run_protocol(proto["name"], prompts, recs, members, **kwargs):
