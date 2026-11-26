@@ -61,6 +61,8 @@ python -m train.grpo_roundrobin train --config configs/train_b9.yaml
 
 Phase 2 passes if dev flip-to-wrong drops without a dev accuracy drop of more than 3 points. Check the reward against Mytsyk et al. 2026 before calling it a replication (TODO in `configs/reward_b9.yaml`).
 
+On Kaggle, `kaggle/b9_train.ipynb` does all of it: install (Unsloth, TRL, vLLM), data, a pilot gate (40 questions, 20 GRPO steps, dev check every 10) that also measures seconds per step, then the full run, zipped as `b9_runs.zip`. Import it like the baseline notebook, set GPU T4 x2 and Internet on, run steps 1-4 interactively, then Save & Run All (Commit).
+
 Each leg writes `monitor.jsonl` (dev accuracy, answer entropy, flip rate every 200 steps) and `reward_terms.jsonl` (every reward term) to `runs/<experiment>/round<r>_<member>/`.
 
 ## Baseline on Kaggle (notebook)
