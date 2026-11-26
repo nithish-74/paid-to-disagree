@@ -10,6 +10,7 @@ dependencies = ["datasets>=2.18", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+analysis = ["matplotlib>=3.7"]   # figures in analysis/paper_tables.py (tables work without it)
 # GPU-only (Kaggle/Colab): vllm, trl, unsloth, peft. Install there, not on Windows.
 
 [tool.setuptools.packages.find]

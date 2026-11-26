@@ -88,6 +88,15 @@ python -m analysis.combine_seeds runs/eval_untrained_seed0 runs/eval_untrained_s
 
 which reports, per metric, the mean over seeds, the 95% t-interval across seeds and the widest per-seed bootstrap interval.
 
+Paper tables and figures come straight from the combined folder (no numbers copied by hand):
+
+```bash
+pip install -e ".[analysis]"   # matplotlib, for the figures
+python -m analysis.paper_tables runs/eval_untrained_combined --out analysis/paper_untrained
+```
+
+It writes `tables.md` (all tables plus appendix), `tables.tex` (booktabs, for the paper), `fig_error_corr.pdf` (H3 heatmaps), `fig_flips.pdf` (harmful vs beneficial revision) and `summary.json` (headline numbers). A difference is marked † only when both the seed interval and the bootstrap interval exclude zero.
+
 ## Status
 
 - [x] C1 question data
