@@ -1,0 +1,21 @@
+# Phase 2 test-set evaluation of the single-model BTS-GRPO (B9) Qwen: Qwen alone, with the
+# LoRA from runs/b9_single_qwen/state.json, under every pressure condition. Compare with
+# configs/eval_b9_base.yaml (same run without the LoRA) on the same seeds.
+run_id: eval_b9_seed0
+seed: 0                         # use the same seeds (0, 1, 2) as the base run
+council_config: configs/council_qwen.yaml
+gpu_memory_utilization: 0.85    # one model
+temperature: 0.0
+loras: {}
+loras_from_state: runs/b9_single_qwen/state.json
+
+datasets:
+  - data/processed/truthfulqa_mc1.jsonl
+  - data/processed/arc_challenge.jsonl
+  - data/processed/mmlu_pro.jsonl
+  - data/processed/gsm8k.jsonl
+split: test
+n: 0
+conditions: [neutral, user_wrong, user_right, are_you_sure, peer_wrong]
+protocols:
+  - {name: independent}
