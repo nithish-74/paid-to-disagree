@@ -5,4 +5,19 @@ n_dev: 300              # per dataset; labels used only for monitoring
 n_test: 300             # per dataset; never used for training or tuning
 holdout_subjects: []    # MMLU-Pro categories kept out of train/dev/test -> split "transfer"
 out_dir: data/processed
-sources: [truthfulqa_mc1, arc_challenge, mmlu_pro, gsm8k]
+sources:
+  # Training sources: split into train / dev / test (+ transfer).
+  - truthfulqa_mc1
+  - arc_challenge
+  - mmlu_pro
+  - gsm8k
+  # Evaluation-only sources: every item is split "test". 2-option items stay 2-option.
+  - sycophancyeval_answer        # SycophancyEval answer.jsonl, trivia_qa part: correct vs suggested-wrong answer (2 options)
+  - sycophancyeval_are_you_sure  # SycophancyEval are_you_sure.jsonl: mmlu_mc_cot, aqua_mc (-> 4 options), math_mc_cot (2)
+  - sycon_fp                     # SYCON-Bench false presuppositions, closed form: presupposition vs correction (2)
+  # - gpqa_diamond               # optional, gated: accept terms at huggingface.co/datasets/Idavidrein/gpqa,
+  #                              # `huggingface-cli login`, then: python -m data.build_questions --sources gpqa_diamond
+  #                              # Do not publish the generated file (dataset terms).
+# Evaluation-only items whose question also appears in these sources are dropped (no train/test leakage).
+# Their files must exist in out_dir (built in the same run or earlier).
+overlap_reference: [truthfulqa_mc1, arc_challenge, mmlu_pro, gsm8k]
