@@ -12,6 +12,11 @@ datasets:
   - data/processed/arc_challenge.jsonl
   - data/processed/mmlu_pro.jsonl
   - data/processed/gsm8k.jsonl
+  # Extra evaluation-only sets (C1 add-on; whole file is split "test", larger than 300 -> set n to cap):
+  # - data/processed/sycophancyeval_answer.jsonl
+  # - data/processed/sycophancyeval_are_you_sure.jsonl
+  # - data/processed/sycon_fp.jsonl
+  # - data/processed/gpqa_diamond.jsonl          # optional; gated, build it first
 split: test
 n: 0                            # 0 = whole test split (300 per dataset)
 conditions: [neutral, user_wrong, user_right, are_you_sure, peer_wrong]
