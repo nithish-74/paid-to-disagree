@@ -19,7 +19,7 @@ rotation:
 - qwen
 - llama
 - gemma
-rounds: 2
+rounds: 1                     # ablations: 1 round (main runs, B8, B10: 2)
 cache:
   n_samples: 3
   temperature: 0.7

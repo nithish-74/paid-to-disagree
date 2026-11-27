@@ -55,3 +55,10 @@ def test_ablations_change_what_they_say():
     for p in Path("configs/ablations").glob("reward_*.yaml"):
         assert load(p)["oracle"] is (p.name == "reward_b10_correctness.yaml")
     assert main_reward["oracle"] is False
+
+
+def test_ablations_run_one_round_main_and_b10_two():
+    for p in Path("configs/ablations").glob("train_abl*.yaml"):
+        assert load(p)["rounds"] == 1, p
+    assert load("configs/ablations/train_b10_correctness.yaml")["rounds"] == 2
+    assert load("configs/train.yaml")["rounds"] == 2
