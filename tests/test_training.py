@@ -18,6 +18,7 @@ from train.grpo_roundrobin import (
     next_leg,
     save_state,
     stale_cache_members,
+    train_settings,
 )
 from train.monitor import DevMonitor, EarlyStopper, answer_entropy, dev_metrics, flip_rate
 from train.peer_cache import PeerCache, generate_samples
@@ -306,6 +307,33 @@ def test_grpo_args_and_validation(tmp_path):
     cfg["grpo"]["per_device_train_batch_size"] = 5  # 5 x 4 = 20, not a multiple of G = 8
     with pytest.raises(ValueError):
         grpo_args(cfg, tmp_path)
+
+
+def test_train_settings_per_member():
+    from train.grpo_roundrobin import load_yaml, member_cfg
+
+    council = load_yaml("configs/council.yaml")
+    for name in ("qwen", "llama"):  # vLLM members: fast generation, fp16 weights and AMP
+        assert train_settings(member_cfg(council, name)) == {
+            "fast_inference": True, "dtype": "float16", "fp16": True, "bf16": False}
+    # Gemma 3 on a T4: no vLLM, float32 as in the council config, no fp16 AMP
+    assert train_settings(member_cfg(council, "gemma")) == {
+        "fast_inference": False, "dtype": "float32", "fp16": False, "bf16": False}
+    override = {"name": "x", "backend": {"kind": "transformers", "dtype": "half", "train_fast_inference": True}}
+    assert train_settings(override)["fast_inference"] is True
+    with pytest.raises(ValueError):
+        train_settings({"name": "x", "backend": {"dtype": "int8"}})
+
+
+def test_grpo_args_follow_member_settings(tmp_path):
+    from train.grpo_roundrobin import load_yaml, member_cfg
+
+    cfg = load_yaml("configs/train.yaml")
+    gemma = train_settings(member_cfg(load_yaml("configs/council.yaml"), "gemma"))
+    args = grpo_args(cfg, tmp_path, gemma)
+    assert args["use_vllm"] is False and args["fp16"] is False and args["bf16"] is False
+    qwen = grpo_args(cfg, tmp_path)  # default = vLLM member
+    assert qwen["use_vllm"] is True and qwen["fp16"] is True
 
 
 def test_load_records_and_dev_prompts(tmp_path):

@@ -82,7 +82,34 @@ def load_records(paths: list[str], split: str, limit: int, seed: int) -> list[Re
     return recs[:limit] if limit else recs
 
 
-def grpo_args(cfg: dict[str, Any], out_dir: Path) -> dict[str, Any]:
+TORCH_DTYPES = {"half": "float16", "float16": "float16", "fp16": "float16",
+                "float32": "float32", "fp32": "float32", "bfloat16": "bfloat16", "bf16": "bfloat16"}
+
+
+def train_settings(member: dict[str, Any]) -> dict[str, Any]:
+    """How to train one member, from its council backend block.
+
+    - vLLM members (default kind): Unsloth fast_inference + TRL use_vllm, fp16 weights, fp16 AMP.
+    - transformers members (Gemma 3 on a T4: vLLM rejects it in fp16 and its fp32 attention
+      kernel does not fit the T4) generate with the model's own generate(): no fast_inference,
+      no use_vllm, and the member's dtype. A float32 member trains in plain fp32 (fp16 AMP
+      would bring back the fp16 overflow the council config avoids).
+    `train_fast_inference: true|false` in the backend block overrides the choice of generator.
+    """
+    backend = member["backend"]
+    kind = backend.get("kind", "vllm")
+    fast = backend.get("train_fast_inference", kind == "vllm")
+    dtype = TORCH_DTYPES.get(str(backend.get("dtype", "half")).lower())
+    if dtype is None:
+        raise ValueError(f"unknown dtype {backend.get('dtype')!r} for member {member.get('name')!r}")
+    return {"fast_inference": bool(fast), "dtype": dtype,
+            "fp16": dtype == "float16", "bf16": dtype == "bfloat16"}
+
+
+def grpo_args(cfg: dict[str, Any], out_dir: Path, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """GRPOConfig kwargs. `settings` (from train_settings) sets use_vllm / fp16 / bf16; the
+    default is a vLLM member in fp16 (T4: no bf16)."""
+    s = settings or {"fast_inference": True, "fp16": True, "bf16": False}
     g = cfg["grpo"]
     if (g["per_device_train_batch_size"] * g.get("gradient_accumulation_steps", 1)) % g["num_generations"]:
         raise ValueError("per_device_train_batch_size x gradient_accumulation_steps must be a multiple of num_generations")
@@ -99,9 +126,9 @@ def grpo_args(cfg: dict[str, Any], out_dir: Path) -> dict[str, Any]:
         "gradient_accumulation_steps": g.get("gradient_accumulation_steps", 1),
         "logging_steps": g.get("logging_steps", 10),
         "save_strategy": "no",  # LoRA checkpoints are saved by the dev monitor
-        "fp16": True,  # T4: no bf16
-        "bf16": False,
-        "use_vllm": True,
+        "fp16": s["fp16"],
+        "bf16": s["bf16"],
+        "use_vllm": s["fast_inference"],
         "report_to": g.get("report_to", "none"),
         "seed": cfg["seed"],
         **g.get("extra", {}),
@@ -150,6 +177,53 @@ class UnslothBackend:
         params = SamplingParams(temperature=temperature, max_tokens=max_tokens, seed=seed)
         outs = self.model.fast_generate(texts, sampling_params=params, lora_request=lora)
         return [o.outputs[0].text for o in outs]
+
+    def next_token_probs(self, conversations, assistant_prefix, candidates):
+        return [{c: 0.0 for c in candidates} for _ in conversations]  # not needed during training
+
+
+class GenerateBackend:
+    """Dev-check generation for members trained without vLLM (Gemma on a T4): the model's own
+    generate() on the in-memory LoRA model. The checkpoint path is not reloaded: dev checks run
+    right after the save, so the in-memory weights are the saved ones."""
+
+    def __init__(self, model: Any, tokenizer: Any, batch_size: int = 16) -> None:
+        self.model, self.tokenizer, self.batch_size = model, tokenizer, batch_size
+        if getattr(tokenizer, "pad_token", None) is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
+
+    def chat(self, conversations, temperature, max_tokens, seed=None):
+        import torch
+        from unsloth import FastLanguageModel
+
+        from council.members import run_in_batches
+
+        texts = [self.tokenizer.apply_chat_template(c, tokenize=False, add_generation_prompt=True) for c in conversations]
+        order = sorted(range(len(texts)), key=lambda j: len(texts[j]))
+
+        def generate(_i: int, chunk: list[str]) -> list[str]:
+            enc = self.tokenizer(chunk, return_tensors="pt", padding=True, add_special_tokens=False).to(self.model.device)
+            kwargs: dict[str, Any] = {"max_new_tokens": max_tokens, "pad_token_id": self.tokenizer.pad_token_id}
+            if temperature > 0:
+                kwargs.update(do_sample=True, temperature=temperature)
+            else:
+                kwargs.update(do_sample=False)
+            with torch.no_grad():
+                gen = self.model.generate(**enc, **kwargs)
+            return self.tokenizer.batch_decode(gen[:, enc["input_ids"].shape[1]:], skip_special_tokens=True)
+
+        FastLanguageModel.for_inference(self.model)
+        try:
+            out = run_in_batches([texts[j] for j in order], self.batch_size, generate,
+                                 lambda e: isinstance(e, torch.OutOfMemoryError),
+                                 lambda n: torch.cuda.empty_cache())
+        finally:
+            FastLanguageModel.for_training(self.model)
+        restored = [""] * len(out)
+        for pos, j in enumerate(order):
+            restored[j] = out[pos]
+        return restored
 
     def next_token_probs(self, conversations, assistant_prefix, candidates):
         return [{c: 0.0 for c in candidates} for _ in conversations]  # not needed during training
@@ -232,14 +306,17 @@ def cmd_train(cfg: dict[str, Any], member_name: str | None, round_: int | None) 
 
     start_lora = state["loras"].get(member_name)
     g = cfg["grpo"]
+    ts = train_settings(mc)
+    print(f"train settings for {member_name}: {ts}")
+    load_kwargs: dict[str, Any] = {"fast_inference": ts["fast_inference"], "dtype": getattr(torch, ts["dtype"])}
+    if ts["fast_inference"]:
+        load_kwargs["gpu_memory_utilization"] = g["gpu_memory_utilization"]
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=start_lora or mc["backend"]["model"],
         max_seq_length=g["max_prompt_length"] + g["max_completion_length"],
         load_in_4bit=False,
-        fast_inference=True,
         max_lora_rank=cfg["lora"]["r"],
-        gpu_memory_utilization=g["gpu_memory_utilization"],
-        dtype=torch.float16,
+        **load_kwargs,
     )
     if start_lora is None:
         model = FastLanguageModel.get_peft_model(
@@ -257,7 +334,8 @@ def cmd_train(cfg: dict[str, Any], member_name: str | None, round_: int | None) 
         return str(path)
 
     def evaluate(path: str | None) -> dict[str, Any]:
-        m = CouncilMember(member_name, UnslothBackend(model, tokenizer, path), temperature=0.0,
+        backend = UnslothBackend(model, tokenizer, path) if ts["fast_inference"] else GenerateBackend(model, tokenizer)
+        m = CouncilMember(member_name, backend, temperature=0.0,
                           max_tokens=g["max_completion_length"], token_prob_fallback=False)
         outs = [o.to_dict() for turns in m.answer_prompts(dev_ps, dev_map) for o in turns]
         return dev_metrics(outs, dev_map, dev_targets)
@@ -283,7 +361,7 @@ def cmd_train(cfg: dict[str, Any], member_name: str | None, round_: int | None) 
         model=model,
         processing_class=tokenizer,
         reward_funcs=[reward_fn],
-        args=GRPOConfig(**grpo_args(cfg, leg_dir)),
+        args=GRPOConfig(**grpo_args(cfg, leg_dir, ts)),
         train_dataset=Dataset.from_list(rows),
         callbacks=[MonitorCallback()],
     )
