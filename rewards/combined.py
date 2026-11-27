@@ -4,7 +4,9 @@
 
 Every term is returned separately so we can see which one drives behaviour.
 
-- PP_cross  Correlated Agreement vs. cached peer answers over the batch (rewards/ca.py)
+- PP_cross  multi-task peer prediction vs. cached peer answers, chosen by cfg.pp_mechanism:
+            "ca" Correlated Agreement (rewards/ca.py, default), "dmi" (rewards/dmi.py),
+            "pts" Peer Truth Serum (rewards/pts.py). DMI needs the cached pool.
 - BTS_info  log(actual / predicted frequency), pooled own group + peers (rewards/bts.py)
 - Pred      -KL(realised peer answers || own peer_prediction)             (rewards/bts.py)
 - Calib     -(confidence - agreement target)^2   (negative Brier, so higher is better)
@@ -23,6 +25,10 @@ from typing import Any
 
 from rewards.bts import Dist, bts_info, prediction_score
 from rewards.ca import PoolEntry, ca_batch
+from rewards.dmi import dmi_batch
+from rewards.pts import pts_batch
+
+PP_MECHANISMS = ("ca", "dmi", "pts")
 
 TERMS = ("pp_cross", "bts_info", "pred", "calib", "flip", "oracle")
 
@@ -78,6 +84,8 @@ class RewardConfig:
     invalid_penalty: float = -2.0  # only when no completion in the group is valid (advantage is 0 then)
     missing_pred: float = -1.0  # Pred when the sample gave no usable peer_prediction
     missing_confidence: float = -1.0  # Calib when the sample gave no confidence
+    pp_mechanism: str = "ca"  # PP_cross mechanism: ca | dmi | pts (ablation 2)
+    dmi_tasks: int = 16  # DMI tasks per score (T >= 2C), current question + pool
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "RewardConfig":
@@ -85,7 +93,10 @@ class RewardConfig:
         unknown = set(d) - known
         if unknown:
             raise ValueError(f"unknown reward config keys: {sorted(unknown)}")
-        return cls(**d)
+        cfg = cls(**d)
+        if cfg.pp_mechanism not in PP_MECHANISMS:
+            raise ValueError(f"pp_mechanism must be one of {PP_MECHANISMS}, got {cfg.pp_mechanism!r}")
+        return cfg
 
 
 def flip_indicator(condition: str, answer: str | None, pressure_target: str | None, neutral_majority: str | None) -> float:
@@ -126,7 +137,17 @@ def combined_rewards(
     rng = random.Random(seed)
     own = [[s.answer if s.usable else None for s in t.samples] for t in tasks]
     peers = [[p.answer if p.usable else None for p in t.peers] for t in tasks]
-    pp_cross = ca_batch(own, peers, rng, pool=pool, qids=[t.qid for t in tasks] if pool is not None else None)
+    qids = [t.qid for t in tasks]
+    if cfg.pp_mechanism == "dmi":
+        if pool is None:
+            raise ValueError("pp_mechanism 'dmi' needs the cached pool")
+        pp_cross = dmi_batch(own, peers, [t.keys for t in tasks], rng, pool, qids, cfg.dmi_tasks)
+    elif cfg.pp_mechanism == "pts":
+        pp_cross = pts_batch(own, peers, [t.keys for t in tasks], pool)
+    elif cfg.pp_mechanism == "ca":
+        pp_cross = ca_batch(own, peers, rng, pool=pool, qids=qids if pool is not None else None)
+    else:
+        raise ValueError(f"pp_mechanism must be one of {PP_MECHANISMS}, got {cfg.pp_mechanism!r}")
 
     out: list[list[dict[str, float]]] = []
     for ti, task in enumerate(tasks):

@@ -166,3 +166,20 @@ def test_no_gold_in_reward_modules():
         if path.name == "combined.py":
             continue
         assert not re.search(r"\bgold\b", text), f"{path} mentions gold"
+
+def _pool(n=30):
+    return [(f"p{k}", "ABCD"[k % 4], ["ABCD"[k % 4]] * 2) for k in range(n)]
+
+
+@pytest.mark.parametrize("mech", ["ca", "dmi", "pts"])
+def test_pp_mechanisms_run(mech):
+    cfg = RewardConfig(pp_mechanism=mech)
+    res = combined_rewards(batch(), cfg, seed=0, pool=_pool())
+    assert all(math.isfinite(r["pp_cross"]) and math.isfinite(r["total"]) for row in res for r in row)
+
+
+def test_pp_mechanism_config_checks():
+    with pytest.raises(ValueError):
+        RewardConfig.from_dict({"pp_mechanism": "bts"})
+    with pytest.raises(ValueError):  # DMI draws its other tasks from the cached pool
+        combined_rewards(batch(), RewardConfig(pp_mechanism="dmi"), seed=0, pool=None)

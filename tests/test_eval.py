@@ -130,9 +130,18 @@ def test_metrics_end_to_end(run_dir):
 
     agg = {r["aggregator"]: r for r in pick(tables["aggregation"], protocol="independent", condition="neutral")}
     assert agg["majority_vote"]["accuracy"] == 1.0 and agg["majority_vote"]["gain_over_mv"] == 0.0
-    assert set(agg) == {"majority_vote", "confidence_weighted", "surprisingly_popular", "dawid_skene"}
+    assert set(agg) == {"majority_vote", "confidence_weighted", "surprisingly_popular", "dawid_skene",
+                        "isp", "ow_l", "ow_i"}
+    assert agg["isp"]["n"] == agg["majority_vote"]["n"]
     kp = {r["aggregator"] for r in pick(tables["aggregation"], protocol="karpathy_style", condition="neutral")}
     assert "chairman" in kp
+
+    # ow_calibration.json from this run, fed back in, adds the labelled-calibration OW variant
+    cal = json.loads((run_dir / "metrics" / "ow_calibration.json").read_text(encoding="utf-8"))
+    assert set(cal["arc_challenge"]) == {"honest", "sycophant", "wrong"}
+    with_cal = compute(run_dir, n_boot=50, seed=0, calibration=cal)
+    agg_cal = {r["aggregator"] for r in pick(with_cal["aggregation"], protocol="independent", condition="neutral")}
+    assert "ow_cal" in agg_cal
 
     # honest & sycophant both always right under neutral -> error vectors constant -> phi undefined
     pw = pick(tables["pairwise"], protocol="independent", condition="neutral", member_a="honest", member_b="sycophant")[0]

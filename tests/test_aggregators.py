@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from council.aggregators import (
@@ -5,9 +7,16 @@ from council.aggregators import (
     confidence_weighted,
     dawid_skene,
     inverse_surprising_popularity,
+    isp_advantage,
+    labelled_accuracies,
     majority_vote,
+    model_second_order,
     optimal_weight,
+    ow_i_accuracies,
+    ow_l_accuracies,
+    ow_weight,
     pick_best,
+    second_order,
     surprisingly_popular,
 )
 
@@ -85,11 +94,69 @@ def test_chairman():
     assert chairman({"stages": {}}) is None
 
 
-def test_isp_ow_are_stubs():
-    with pytest.raises(NotImplementedError):
-        inverse_surprising_popularity([])
-    with pytest.raises(NotImplementedError):
-        optimal_weight([])
+def _true_second_order(acc, labels):
+    """P(A_i | A_j) from the paper's closed form (Appendix F.2) for given accuracies."""
+    K = len(labels)
+    return {(i, j): {(k, l): model_second_order(acc[i], acc[j], k == l, K) for k in labels for l in labels}
+            for i in acc for j in acc if i != j}
+
+
+def test_isp_paper_example_1():
+    # Ai et al. Example 1 / Table 1: x1 = x2 = 1, x3 = x4 = 0.5, K = 2, true label s1.
+    labels = ["A", "B"]
+    P = _true_second_order({"m1": 1.0, "m2": 1.0, "m3": 0.5, "m4": 0.5}, labels)
+    outs = [out("m1", "A"), out("m2", "A"), out("m3", "B"), out("m4", "B")]
+    adv = isp_advantage(outs, P, labels)
+    assert adv["A"] == pytest.approx(1 / 3)  # App. E.2: ISP's advantage of s1 is 1/3
+    assert inverse_surprising_popularity(outs, P, labels) == "A"  # MV would tie, SP picks s2
+    for case in (["A", "A", "A", "A"], ["A", "A", "A", "B"], ["A", "A", "B", "A"]):
+        outs = [out(f"m{n + 1}", a) for n, a in enumerate(case)]
+        assert inverse_surprising_popularity(outs, P, labels) == "A"
+
+
+def test_isp_advantages_sum_to_zero_and_fallback():
+    labels = list("ABCD")
+    P = _true_second_order({"a": 0.8, "b": 0.6, "c": 0.5}, labels)
+    outs = [out("a", "A"), out("b", "B"), out("c", "B")]
+    assert sum(isp_advantage(outs, P, labels).values()) == pytest.approx(0.0)
+    one = [out("a", "C"), out("b", "B", valid=False)]
+    assert inverse_surprising_popularity(one, P, labels) == "C"  # < 2 valid -> majority vote
+
+
+def test_second_order_counts():
+    qs = [[out("a", "A"), out("b", "A")], [out("a", "A"), out("b", "B")], [out("a", "B"), out("b", "B")],
+          [out("a", "C"), out("b", "C", valid=False)]]
+    P = second_order(qs, list("ABC"))
+    assert P[("a", "b")][("A", "A")] == 1.0
+    assert P[("a", "b")][("A", "B")] == pytest.approx(0.5)
+    assert ("A", "C") not in P[("a", "b")]  # b never validly said C: left out (1/K is used later)
+
+
+def test_ow_weights_and_strong_member_wins():
+    assert ow_weight(0.25, 4) == pytest.approx(0.0)  # chance level -> weight 0
+    assert ow_weight(0.1, 4) == pytest.approx(0.0)  # below chance is clipped, i.e. excluded
+    assert ow_weight(0.6, 2) == pytest.approx(math.log(0.6 / 0.4))  # K = 2: inverse logistic (Cor. 3.2)
+    assert math.isfinite(ow_weight(1.0, 4))
+    outs = [out("s", "A"), out("w1", "B"), out("w2", "B")]
+    acc = {"s": 0.95, "w1": 0.6, "w2": 0.6}  # ln 57 = 4.04 > 2 * ln 4.5 = 3.01
+    assert optimal_weight(outs, acc, K=4) == "A"
+    assert majority_vote(outs) == "B"
+    assert optimal_weight(outs, {"s": 0.95}, K=4) == "B"  # missing accuracy -> majority vote
+
+
+def test_ow_l_recovers_accuracies():
+    labels = list("ABCD")
+    truth = {"a": 0.9, "b": 0.7, "c": 0.55}
+    est = ow_l_accuracies(_true_second_order(truth, labels), labels)
+    for m, x in truth.items():
+        assert est[m] == pytest.approx(x, abs=0.02)
+
+
+def test_ow_i_and_labelled_accuracies():
+    qs = [[out("a", "A"), out("b", "B")], [out("a", "C"), out("b", "C")],
+          [out("a", "D", valid=False), out("b", "D")]]
+    assert ow_i_accuracies(qs, ["A", "C", None]) == {"a": 1.0, "b": 0.5}
+    assert labelled_accuracies(qs, ["A", "C", "D"]) == {"a": pytest.approx(2 / 3), "b": pytest.approx(2 / 3)}
 
 
 def test_pick_best_empty():
