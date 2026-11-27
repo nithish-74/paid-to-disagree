@@ -7,6 +7,9 @@ Tables (CSV in runs/<run_id>/metrics/, plus metrics.json):
                    (moved to the pushed answer; under peer_wrong this is the peer-flip rate)
   pairwise.csv     per cell x member pair: error correlation (phi), Cohen's kappa   [H3]
   aggregation.csv  per cell x aggregator: accuracy and gain over majority vote      [H4]
+                   (MCQ cells also get isp, ow_l, ow_i, and ow_cal with --ow-calibration)
+  ow_calibration.json  per dataset x member stage-1 neutral accuracy; from a dev-split run
+                   this is the labelled calibration input for ow_cal
 
 A cell is (dataset, protocol, condition). Every number carries a 95% bootstrap CI from
 resampling questions. Run 3 seeds and combine them in analysis/ before claiming anything.
@@ -30,10 +33,16 @@ from council.aggregators import (
     chairman,
     confidence_weighted,
     dawid_skene,
+    inverse_surprising_popularity,
+    labelled_accuracies,
     majority_vote,
+    optimal_weight,
+    ow_i_accuracies,
+    ow_l_accuracies,
+    second_order,
     surprisingly_popular,
 )
-from data.build_questions import load_jsonl
+from data.build_questions import LETTERS, load_jsonl
 from rewards.bts import prediction_score
 from train.monitor import answer_entropy
 
@@ -232,7 +241,9 @@ def pairwise_table(idx: RunIndex, n_boot: int, seed: int) -> list[dict[str, Any]
     return rows
 
 
-def aggregate_cell(idx: RunIndex, cell) -> dict[str, dict[str, str | None]]:
+def aggregate_cell(
+    idx: RunIndex, cell, calibration: dict[str, dict[str, float]] | None = None
+) -> dict[str, dict[str, str | None]]:
     """answers[aggregator][qid] for one cell."""
     final = idx.final(cell)
     qids = sorted(final)
@@ -248,14 +259,68 @@ def aggregate_cell(idx: RunIndex, cell) -> dict[str, dict[str, str | None]]:
     chair = idx.cells[cell].get("stage3_chairman")
     if chair:
         answers["chairman"] = {q: chairman({"stages": {"stage3_chairman": list(chair.get(q, {}).values())}}) for q in qids}
-    # TODO: add "isp" and "optimal_weight" once their equations are implemented (council/aggregators.py).
+    if qids and all(idx.questions[q]["answer_type"] == "mcq" for q in qids):
+        answers.update(second_order_answers(idx, cell[0], qids, outs, calibration))
     return answers
 
 
-def aggregation_table(idx: RunIndex, n_boot: int, seed: int) -> list[dict[str, Any]]:
+def second_order_answers(
+    idx: RunIndex,
+    dataset: str,
+    qids: list[str],
+    outs: dict[str, list[Line]],
+    calibration: dict[str, dict[str, float]] | None = None,
+) -> dict[str, dict[str, str | None]]:
+    """ISP, OW-L, OW-I (Ai et al., arXiv 2510.01499) and, given calibration accuracies, OW-cal.
+
+    Second-order information is estimated from this cell's own answers over all its questions
+    (label-free); questions with different numbers of options get separate estimates.
+    calibration[dataset][member] = accuracy on a labelled split (e.g. ow_calibration.json of a
+    dev-split run); never the test labels being scored.
+    """
+    by_k: dict[int, list[str]] = defaultdict(list)
+    for q in qids:
+        by_k[len(idx.questions[q]["options"])].append(q)
+    res: dict[str, dict[str, str | None]] = {"isp": {}, "ow_l": {}, "ow_i": {}}
+    cal = (calibration or {}).get(dataset)
+    if cal:
+        res["ow_cal"] = {}
+    for K, group in by_k.items():
+        labels = list(LETTERS[:K])
+        P = second_order([outs[q] for q in group], labels)
+        isp = {q: inverse_surprising_popularity(outs[q], P, labels, q) for q in group}
+        res["isp"].update(isp)
+        x_l = ow_l_accuracies(P, labels)
+        x_i = ow_i_accuracies([outs[q] for q in group], [isp[q] for q in group])
+        for q in group:
+            res["ow_l"][q] = optimal_weight(outs[q], x_l, K, q)
+            res["ow_i"][q] = optimal_weight(outs[q], x_i, K, q)
+            if cal:
+                res["ow_cal"][q] = optimal_weight(outs[q], cal, K, q)
+    return res
+
+
+def ow_calibration(idx: RunIndex) -> dict[str, dict[str, float]]:
+    """Per dataset and member: stage-1 accuracy under the neutral condition (independent protocol).
+    Written for every run; pass a DEV-split run's file to OW-cal when scoring a test run."""
+    out: dict[str, dict[str, float]] = {}
+    for (dataset, protocol, condition), stages in idx.cells.items():
+        if protocol != "independent" or condition != "neutral" or "stage1" not in stages:
+            continue
+        s1 = stages["stage1"]
+        qs = sorted(s1)
+        if not qs or idx.questions[qs[0]]["answer_type"] != "mcq":
+            continue
+        out[dataset] = labelled_accuracies([list(s1[q].values()) for q in qs], [idx.questions[q]["gold"] for q in qs])
+    return out
+
+
+def aggregation_table(
+    idx: RunIndex, n_boot: int, seed: int, calibration: dict[str, dict[str, float]] | None = None
+) -> list[dict[str, Any]]:
     rows = []
     for cell in sorted(idx.cells):
-        answers = aggregate_cell(idx, cell)
+        answers = aggregate_cell(idx, cell, calibration)
         qids = sorted(answers["majority_vote"])
         gold = {q: idx.questions[q]["gold"] for q in qids}
         hit = {name: {q: float(a.get(q) == gold[q]) for q in qids} for name, a in answers.items()}
@@ -283,7 +348,9 @@ def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
             w.writerow({k: (round(v, 6) if isinstance(v, float) else v) for k, v in r.items()})
 
 
-def compute(run_dir: Path, n_boot: int = 1000, seed: int = 0) -> dict[str, list[dict[str, Any]]]:
+def compute(
+    run_dir: Path, n_boot: int = 1000, seed: int = 0, calibration: dict[str, dict[str, float]] | None = None
+) -> dict[str, list[dict[str, Any]]]:
     run_dir = Path(run_dir)
     lines = load_jsonl(run_dir / "members.jsonl")
     questions = {r["qid"]: r for r in load_jsonl(run_dir / "questions.jsonl")}
@@ -292,12 +359,13 @@ def compute(run_dir: Path, n_boot: int = 1000, seed: int = 0) -> dict[str, list[
         "members": member_table(idx, n_boot, seed),
         "flips": flip_table(idx, n_boot, seed),
         "pairwise": pairwise_table(idx, n_boot, seed),
-        "aggregation": aggregation_table(idx, n_boot, seed),
+        "aggregation": aggregation_table(idx, n_boot, seed, calibration),
     }
     out = run_dir / "metrics"
     for name, rows in tables.items():
         write_csv(rows, out / f"{name}.csv")
     (out / "metrics.json").write_text(json.dumps(tables, indent=1), encoding="utf-8")
+    (out / "ow_calibration.json").write_text(json.dumps(ow_calibration(idx), indent=1), encoding="utf-8")
     return tables
 
 
@@ -306,8 +374,12 @@ def main() -> None:
     parser.add_argument("run_dir")
     parser.add_argument("--n-boot", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--ow-calibration", help="ow_calibration.json from a DEV-split run (enables ow_cal)")
     args = parser.parse_args()
-    tables = compute(Path(args.run_dir), args.n_boot, args.seed)
+    calibration = None
+    if args.ow_calibration:
+        calibration = json.loads(Path(args.ow_calibration).read_text(encoding="utf-8"))
+    tables = compute(Path(args.run_dir), args.n_boot, args.seed, calibration)
     for name, rows in tables.items():
         print(f"{name:12s} {len(rows)} rows -> {Path(args.run_dir) / 'metrics' / (name + '.csv')}")
 

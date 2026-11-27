@@ -32,7 +32,8 @@ CONDITION_NAMES = {
     "user_right": "user pushes right",
     "are_you_sure": "\"are you sure?\"",
 }
-AGGREGATORS = ("majority_vote", "confidence_weighted", "surprisingly_popular", "dawid_skene", "chairman")
+AGGREGATORS = ("majority_vote", "confidence_weighted", "surprisingly_popular", "isp", "ow_l", "ow_i", "ow_cal",
+               "dawid_skene", "chairman")
 
 
 # ---------------------------------------------------------------- reading

@@ -12,3 +12,5 @@ invalid_margin: 1.0      # unparseable completion = lowest valid total in its gr
 invalid_penalty: -2.0    # only when a whole group is unparseable; not fixed by the doc
 missing_pred: -1.0       # not fixed by the doc
 missing_confidence: -1.0 # not fixed by the doc
+pp_mechanism: ca          # PP_cross: ca (Correlated Agreement) | dmi (Kong 2020) | pts (Peer Truth Serum); ablation 2
+dmi_tasks: 16             # DMI: tasks per score (T >= 2C), current question + cached pool
