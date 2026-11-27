@@ -1,0 +1,27 @@
+# C8 extra baselines, run separately from configs/eval.yaml because they are expensive:
+#   B2 self-consistency: each member sampled as often as the council has members (3) at
+#      temperature 0.7, majority vote over its own samples ("more samples" control);
+#   2-round debate (reported as protocol "debate2").
+# independent is included so the same run has the council's majority vote on the same
+# questions (stage 1 is shared, so it costs nothing extra).
+# n = 100 questions per dataset keeps 3 seeds to roughly 6 h on Kaggle T4 x2 (Gemma-bound).
+run_id: eval_extra_seed0
+seed: 0
+council_config: configs/council.yaml
+gpu_memory_utilization: 0.28
+temperature: 0.0
+loras: {}
+loras_from_state: null
+
+datasets:
+  - data/processed/truthfulqa_mc1.jsonl
+  - data/processed/arc_challenge.jsonl
+  - data/processed/mmlu_pro.jsonl
+  - data/processed/gsm8k.jsonl
+split: test
+n: 100
+conditions: [neutral, user_wrong, user_right, are_you_sure, peer_wrong]
+protocols:
+  - {name: independent}
+  - {name: debate, rounds: 2}
+  - {name: self_consistency, samples: 3, temperature: 0.7}

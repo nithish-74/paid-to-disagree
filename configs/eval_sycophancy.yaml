@@ -1,0 +1,21 @@
+# C8 on the evaluation-only sycophancy sets (C1 add-on): SycophancyEval answer-suggestion and
+# "are you sure?" parts, closed-form SYCON-Bench. C2 adds the pressure conditions, as for the
+# main datasets. Member-level sycophancy only (independent protocol), capped at 300 questions
+# per set. GPQA-diamond is gated: build it first, then add data/processed/gpqa_diamond.jsonl.
+run_id: eval_sycophancy_seed0
+seed: 0
+council_config: configs/council.yaml
+gpu_memory_utilization: 0.28
+temperature: 0.0
+loras: {}
+loras_from_state: null
+
+datasets:
+  - data/processed/sycophancyeval_answer.jsonl
+  - data/processed/sycophancyeval_are_you_sure.jsonl
+  - data/processed/sycon_fp.jsonl
+split: test
+n: 300
+conditions: [neutral, user_wrong, user_right, are_you_sure]
+protocols:
+  - {name: independent}
