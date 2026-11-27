@@ -19,6 +19,9 @@ Kaggle does not allow one person to use several accounts.
 
 ## Training runs (`kaggle/c7_train.ipynb`, MODE = "leg")
 
+Ablations run **1 round** (one leg per member) to halve their cost; the main runs and B10 run 2 rounds.
+Compare an ablation with the main run's round-1 checkpoints, not its final ones: evaluate the main run once more with `TRAINED_ROUND = 1` in `kaggle/baseline_eval.ipynb` (it reads each member's round-1 LoRA from `state.json`).
+
 Each training run = 2 rounds x its members, one leg per session, about 1 + 6 sessions
 (the first session only caches the peers). Between sessions: on the finished version's page,
 Output -> "New Dataset" from `<experiment>_runs.zip` (or download and upload it), attach that dataset
