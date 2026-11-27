@@ -1,0 +1,54 @@
+# Ablation 7: council of 4 (main three + SmolLM2-1.7B-Instruct).
+# Run with kaggle/c7_train.ipynb: CONFIG = this file, MODE = 'leg'.
+experiment: abl7_size4
+seed: 0
+council_config: configs/ablations/council_size4.yaml
+reward_config: configs/reward.yaml
+train_data:
+- data/processed/truthfulqa_mc1.jsonl
+- data/processed/arc_challenge.jsonl
+- data/processed/mmlu_pro.jsonl
+max_train_questions: 2000
+conditions:
+- neutral
+- user_wrong
+- user_right
+- are_you_sure
+population: cross_model
+rotation:
+- qwen
+- llama
+- gemma
+- smollm
+rounds: 2
+cache:
+  n_samples: 3
+  temperature: 0.7
+  gpu_memory_utilization: 0.85
+lora:
+  r: 8
+  alpha: 16
+  target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+grpo:
+  num_generations: 8
+  max_completion_length: 256
+  max_prompt_length: 1024
+  learning_rate: 5.0e-06
+  temperature: 0.8
+  beta: 0.0
+  max_steps: 800
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  logging_steps: 10
+  gpu_memory_utilization: 0.55
+  report_to: none
+  extra: {}
+monitor:
+  every: 200
+  dev_n: 200
+  max_acc_drop: 0.03
+  min_entropy: 0.5

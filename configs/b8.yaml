@@ -1,0 +1,36 @@
+# Baseline B8: synthetic-data anti-sycophancy SFT (Wei et al. 2023, arXiv 2308.03958).
+# See train/b8_sft.py for the approved adaptation to the council.
+#   python -m train.b8_sft generate --config configs/b8.yaml            # CPU + network, once
+#   python -m train.b8_sft filter   --config configs/b8.yaml --member qwen
+#   python -m train.b8_sft train    --config configs/b8.yaml --member qwen
+experiment: b8_wei_sft
+seed: 0
+council_config: configs/council.yaml
+members: [qwen, llama, gemma]
+
+# Prompts per member for the filtration step. The paper used a pool of 100k; training uses
+# 1k steps x 32 = 32k examples, and about half survive filtration for 1-2B models, so 40k is
+# enough. Gemma runs on the slow transformers path on a T4, so it gets fewer (examples repeat).
+n_prompts:
+  default: 40000
+  gemma: 15000
+
+self_data:                     # the instruction-data stand-in (5 synthetic : 1 self)
+  files:
+    - data/processed/truthfulqa_mc1.jsonl
+    - data/processed/arc_challenge.jsonl
+    - data/processed/mmlu_pro.jsonl
+  n_questions: 4000
+
+lora:
+  r: 8
+  alpha: 16
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+
+sft:
+  steps: 1000                  # paper: 1k
+  batch_size: 8                # x 4 accumulation = 32 per step (paper: 32)
+  gradient_accumulation_steps: 4
+  learning_rate: 1.0e-4        # LoRA; the paper's 3e-3 is for full fine-tuning of PaLM
+  mix_ratio: 5                 # synthetic : self, paper 5:1
+  max_seq_length: 1024
