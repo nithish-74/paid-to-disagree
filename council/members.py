@@ -283,6 +283,37 @@ class VLLMBackend:
         return result
 
 
+def run_in_batches(
+    items: list,
+    batch_size: int,
+    fn: Callable[[int, list], list],
+    is_oom: Callable[[BaseException], bool],
+    on_oom: Callable[[int], None] | None = None,
+) -> list:
+    """Apply fn(start_index, chunk) to consecutive chunks of items and concatenate the results.
+
+    If a chunk runs out of GPU memory, the batch size is halved and the same chunk is retried
+    (down to 1; an OOM at batch size 1 is re-raised). The smaller size is kept for the rest of
+    this call. on_oom(new_batch_size) runs before each retry, e.g. to empty the CUDA cache.
+    """
+    out: list = []
+    i, size = 0, max(1, batch_size)
+    while i < len(items):
+        chunk = items[i : i + size]
+        try:
+            res = fn(i, chunk)
+        except Exception as exc:
+            if size == 1 or not is_oom(exc):
+                raise
+            size = max(1, size // 2)
+            if on_oom is not None:
+                on_oom(size)
+            continue
+        out += res
+        i += len(chunk)
+    return out
+
+
 class TransformersBackend:
     """Plain transformers backend for local GPUs/CPUs where vLLM is unavailable (e.g. Windows).
 
@@ -334,27 +365,36 @@ class TransformersBackend:
     def _encode(self, texts: list[str]):
         return self.tok(texts, return_tensors="pt", padding=True, add_special_tokens=False).to(self.device)
 
+    def _is_oom(self, exc: BaseException) -> bool:
+        return isinstance(exc, self.torch.OutOfMemoryError)
+
+    def _on_oom(self, new_size: int) -> None:
+        self.torch.cuda.empty_cache()
+        print(f"    [{self.name}] out of GPU memory, retrying with batch size {new_size}", file=sys.stderr, flush=True)
+
     def chat(self, conversations, temperature, max_tokens, seed=None):
         texts = [self.tok.apply_chat_template(c, tokenize=False, add_generation_prompt=True) for c in conversations]
         # Batch prompts of similar length together: less padding, so less GPU memory per batch.
         order = sorted(range(len(texts)), key=lambda j: len(texts[j]))
         texts = [texts[j] for j in order]
-        out: list[str] = []
         start = time.time()
+
+        def generate(i: int, chunk: list[str]) -> list[str]:
+            enc = self._encode(chunk)
+            kwargs: dict[str, Any] = {"max_new_tokens": max_tokens, "pad_token_id": self.tok.pad_token_id}
+            if temperature > 0:
+                if seed is not None:
+                    self.torch.manual_seed(seed + i)
+                kwargs.update(do_sample=True, temperature=temperature)
+            else:
+                kwargs.update(do_sample=False, temperature=None, top_p=None, top_k=None)
+            with self.torch.no_grad():
+                gen = self.model.generate(**enc, **kwargs)
+            return self.tok.batch_decode(gen[:, enc["input_ids"].shape[1] :], skip_special_tokens=True)
+
         self._on_device()
         try:
-            for i in range(0, len(texts), self.batch_size):
-                enc = self._encode(texts[i : i + self.batch_size])
-                kwargs: dict[str, Any] = {"max_new_tokens": max_tokens, "pad_token_id": self.tok.pad_token_id}
-                if temperature > 0:
-                    if seed is not None:
-                        self.torch.manual_seed(seed + i)
-                    kwargs.update(do_sample=True, temperature=temperature)
-                else:
-                    kwargs.update(do_sample=False, temperature=None, top_p=None, top_k=None)
-                with self.torch.no_grad():
-                    gen = self.model.generate(**enc, **kwargs)
-                out += self.tok.batch_decode(gen[:, enc["input_ids"].shape[1] :], skip_special_tokens=True)
+            out = run_in_batches(texts, self.batch_size, generate, self._is_oom, self._on_oom)
         finally:
             self._off_device()
         print(f"    [{self.name}] {len(texts)} replies in {time.time() - start:.0f}s", file=sys.stderr, flush=True)
@@ -377,18 +417,31 @@ class TransformersBackend:
                 ids = self.tok.encode(variant, add_special_tokens=False)
                 if len(ids) == 1:
                     cand_ids[c].add(ids[0])
-        result: list[dict[str, float]] = []
+        order = sorted(range(len(texts)), key=lambda j: len(texts[j]))  # less padding per batch
+
+        def last_token_probs(_i: int, chunk: list[str]) -> list[dict[str, float]]:
+            enc = self._encode(chunk)
+            with self.torch.no_grad():
+                # Only the last position's logits are needed. Without logits_to_keep=1 the model
+                # builds [batch, seq_len, vocab] logits: for Gemma 3 (262k vocab, fp32) that was
+                # an 11 GiB allocation on long MMLU-Pro prompts and crashed the Kaggle eval.
+                try:
+                    out = self.model(**enc, logits_to_keep=1)
+                except TypeError:  # older transformers without logits_to_keep
+                    out = self.model(**enc)
+                probs = self.torch.softmax(out.logits[:, -1, :].float(), dim=-1)
+            return [{c: float(sum(row[t] for t in ids)) for c, ids in cand_ids.items()} for row in probs]
+
         self._on_device()
         try:
-            for i in range(0, len(texts), self.batch_size):
-                enc = self._encode(texts[i : i + self.batch_size])
-                with self.torch.no_grad():
-                    logits = self.model(**enc).logits[:, -1, :].float()
-                probs = self.torch.softmax(logits, dim=-1)
-                for row in probs:
-                    result.append({c: float(sum(row[t] for t in ids)) for c, ids in cand_ids.items()})
+            sorted_result = run_in_batches(
+                [texts[j] for j in order], self.batch_size, last_token_probs, self._is_oom, self._on_oom
+            )
         finally:
             self._off_device()
+        result: list[dict[str, float]] = [{} for _ in texts]
+        for pos, j in enumerate(order):
+            result[j] = sorted_result[pos]
         return result
 
     def close(self) -> None:

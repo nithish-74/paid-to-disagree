@@ -11,6 +11,7 @@ from council.members import (
     parse_confidence,
     parse_distribution,
     parse_letter,
+    run_in_batches,
     system_prompt,
     write_outputs,
 )
@@ -183,3 +184,47 @@ def test_prefers_object_with_answer_over_nested_dict():
     raw = '{"answer": "B" "confidence": 0.5, "peer_prediction": {"A": 1}}'
     assert parse_answer(raw, MCQ).error == "bad_answer"
     assert extract_json_object('{"x": 1} then {"answer": "D"}') == {"answer": "D"}
+
+
+class FakeOOM(Exception):
+    pass
+
+
+def _oom_above(limit, calls):
+    """fn that fails with FakeOOM when a chunk is bigger than `limit`; doubles each item."""
+
+    def fn(start, chunk):
+        calls.append((start, len(chunk)))
+        if len(chunk) > limit:
+            raise FakeOOM()
+        return [x * 2 for x in chunk]
+
+    return fn
+
+
+def test_run_in_batches_plain():
+    calls = []
+    out = run_in_batches(list(range(10)), 4, _oom_above(99, calls), lambda e: isinstance(e, FakeOOM))
+    assert out == [x * 2 for x in range(10)]
+    assert calls == [(0, 4), (4, 4), (8, 2)]
+
+
+def test_run_in_batches_halves_on_oom_and_keeps_order():
+    calls, sizes = [], []
+    out = run_in_batches(
+        list(range(10)), 8, _oom_above(3, calls), lambda e: isinstance(e, FakeOOM), on_oom=sizes.append
+    )
+    assert out == [x * 2 for x in range(10)], "every item exactly once, in order"
+    assert sizes == [4, 2], "8 -> 4 -> 2, then the smaller size is kept"
+    assert calls[:3] == [(0, 8), (0, 4), (0, 2)] and all(n <= 2 for _, n in calls[3:])
+
+
+def test_run_in_batches_reraises():
+    with pytest.raises(FakeOOM):  # still OOM at batch size 1
+        run_in_batches([1, 2], 2, _oom_above(0, []), lambda e: isinstance(e, FakeOOM))
+    with pytest.raises(ValueError):  # other errors are never retried
+
+        def bad(start, chunk):
+            raise ValueError("boom")
+
+        run_in_batches([1, 2], 2, bad, lambda e: isinstance(e, FakeOOM))
