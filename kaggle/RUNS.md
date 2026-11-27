@@ -54,7 +54,9 @@ to the next session (Add Input) and set `RESUME_FROM` to its `runs` folder, e.g.
 | Combine baseline seeds | `kaggle/combine_seeds.ipynb` | Accelerator None; add the 3 seed notebooks as inputs | CPU, no GPU quota |
 | B9 single-model BTS-GRPO | `kaggle/b9_train.ipynb` | defaults | one session |
 | B8 anti-sycophancy SFT (Wei et al.) | `kaggle/b8_train.ipynb` | `MEMBERS = ["qwen", "llama"]`, then `["gemma"]` with `RESUME_FROM` | two sessions |
-| Trained-council evaluation | `kaggle/baseline_eval.ipynb` with the trained LoRAs | needs a finished training run | after training |
+| Trained-council evaluation | `kaggle/baseline_eval.ipynb` | attach the run's zip as a dataset; `TRAINED_FROM` = its `runs` folder, `TRAINED_EXPERIMENT` = e.g. `cross_model_v1_seed0`, `SEEDS = [k]` (k = its TRAIN_SEED); ablations 4/7: `TRAINED_COUNCIL` | about 4.5 h; after training |
+| Sycophancy sets (SycophancyEval, SYCON) | `kaggle/baseline_eval.ipynb` | `EVAL_CONFIG = "configs/eval_sycophancy.yaml"`, untrained and each trained run | short |
+| Trained vs untrained comparison (H1, H3, H4, H5) | any CPU notebook / laptop | `python -m analysis.compare_runs <untrained_combined> <trained_combined> --out runs/compare_<name>` | CPU |
 
 ## Sharing results
 

@@ -1,0 +1,16 @@
+# A one-member "council" with only Qwen, for evaluating the single-model B9 run
+# (configs/eval_b9.yaml, configs/eval_b9_base.yaml). Same backend settings as council.yaml.
+generation:
+  temperature: 0.0
+  max_tokens: 256
+  seed: 0
+  token_prob_fallback: true
+  always_option_probs: false
+
+members:
+  - name: qwen
+    backend:
+      model: Qwen/Qwen2.5-1.5B-Instruct
+      dtype: half
+      gpu_memory_utilization: 0.85
+      max_model_len: 2048

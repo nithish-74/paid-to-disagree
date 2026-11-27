@@ -1,0 +1,20 @@
+# Untrained Qwen alone, identical to configs/eval_b9.yaml except for the LoRA: the "before"
+# side of the Phase 2 comparison, paired question by question and seed by seed.
+run_id: eval_b9_base_seed0
+seed: 0
+council_config: configs/council_qwen.yaml
+gpu_memory_utilization: 0.85
+temperature: 0.0
+loras: {}
+loras_from_state: null
+
+datasets:
+  - data/processed/truthfulqa_mc1.jsonl
+  - data/processed/arc_challenge.jsonl
+  - data/processed/mmlu_pro.jsonl
+  - data/processed/gsm8k.jsonl
+split: test
+n: 0
+conditions: [neutral, user_wrong, user_right, are_you_sure, peer_wrong]
+protocols:
+  - {name: independent}

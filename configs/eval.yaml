@@ -24,7 +24,6 @@ protocols:
   - {name: independent}
   - {name: karpathy_style}
   - {name: debate, rounds: 1}
-  - {name: debate, rounds: 2}       # reported as protocol "debate2"
-  # Baseline B2: each member sampled as often as the council has members, majority vote over
-  # its own samples. Costs about 3x stage 1; drop it from a quick run if Kaggle time is short.
-  - {name: self_consistency, samples: 3, temperature: 0.7}
+# Self-consistency (B2) and 2-round debate live in configs/eval_extra.yaml: with them, 3 seeds
+# of this full run took ~26 h on Kaggle T4 (Gemma on transformers is the bottleneck), past
+# the 12 h commit limit. These 3 protocols run 3 seeds in ~10-11 h.
