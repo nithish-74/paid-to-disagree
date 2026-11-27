@@ -1,0 +1,26 @@
+# Ablation 4: homogeneous council, three copies of Qwen2.5-1.5B (main: 3 families).
+generation:
+  temperature: 0.0
+  max_tokens: 256
+  seed: 0
+  token_prob_fallback: true
+  always_option_probs: false
+members:
+- name: qwen_a
+  backend:
+    model: Qwen/Qwen2.5-1.5B-Instruct
+    dtype: half
+    gpu_memory_utilization: 0.85
+    max_model_len: 2048
+- name: qwen_b
+  backend:
+    model: Qwen/Qwen2.5-1.5B-Instruct
+    dtype: half
+    gpu_memory_utilization: 0.85
+    max_model_len: 2048
+- name: qwen_c
+  backend:
+    model: Qwen/Qwen2.5-1.5B-Instruct
+    dtype: half
+    gpu_memory_utilization: 0.85
+    max_model_len: 2048

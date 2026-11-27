@@ -1,0 +1,16 @@
+# Ablation 2: PP_cross by the Peer Truth Serum instead of Correlated Agreement.
+l1_pp_cross: 1.0
+l2_bts_info: 0.5
+l3_pred: 0.25
+l4_calib: 0.25
+l5_flip: 1.0
+l0_oracle: 1.0
+oracle: false
+bts_mean: geometric
+eps: 0.001
+invalid_margin: 1.0
+invalid_penalty: -2.0
+missing_pred: -1.0
+missing_confidence: -1.0
+pp_mechanism: pts
+dmi_tasks: 16

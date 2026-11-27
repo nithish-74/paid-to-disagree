@@ -1,0 +1,18 @@
+# Baseline B10: correctness-reward GRPO, an upper bound that USES LABELS.
+# Only the oracle term 1[answer = gold] is on; every peer-prediction term is off.
+# oracle: true is the only way gold labels reach rewards/ (guarded in rewards/combined.py).
+l1_pp_cross: 0.0
+l2_bts_info: 0.0
+l3_pred: 0.0
+l4_calib: 0.0
+l5_flip: 0.0
+l0_oracle: 1.0
+oracle: true
+bts_mean: geometric
+eps: 0.001
+invalid_margin: 1.0
+invalid_penalty: -2.0
+missing_pred: -1.0
+missing_confidence: -1.0
+pp_mechanism: ca
+dmi_tasks: 16
