@@ -75,6 +75,8 @@ eval, then seeds 0-2 on the full test splits (one seed per GPU on T4 x2), metric
 seed-combined tables, zipped as `eval_untrained.zip`. Open it on Kaggle via File -> Import Notebook,
 set GPU T4 x2 and Internet on, run steps 1-5 interactively, then Save & Run All (Commit).
 
+**Combining seeds on Kaggle (CPU).** When each seed ran as its own Kaggle notebook (one seed per session, because three seeds do not fit in 12 hours), `kaggle/combine_seeds.ipynb` collects every `runs/eval_untrained_seed<k>/` from the notebooks added as inputs, recomputes the metrics with the current code, runs `analysis.combine_seeds` and `analysis.paper_tables`, and zips the tables, figures and per-seed metrics as `combined_tables.zip`. Set Accelerator to None: it uses no GPU quota.
+
 ## Evaluation
 
 ```bash
